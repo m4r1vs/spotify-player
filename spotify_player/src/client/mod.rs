@@ -1458,12 +1458,13 @@ impl AppClient {
 
         // get the show's episodes
         let episodes = self
-            .all_paging_items::<rspotify::model::SimplifiedEpisode>(
+            .all_paging_items::<Option<rspotify::model::SimplifiedEpisode>>(
                 &format!("{SPOTIFY_API_ENDPOINT}/shows/{}/episodes", show_id.id()),
                 show.episodes.total as usize,
             )
             .await?
             .into_iter()
+            .flatten()
             .map(std::convert::Into::into)
             .collect::<Vec<_>>();
 

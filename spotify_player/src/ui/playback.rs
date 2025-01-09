@@ -1,3 +1,6 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
+
 use super::{
     config, utils::construct_and_render_block, Alignment, Borders, Constraint, Frame, Gauge,
     Layout, Line, LineGauge, Modifier, Paragraph, PlaybackMetadata, Rect, SharedState, Span, Style,
@@ -12,6 +15,20 @@ use crate::{
 #[cfg(feature = "image")]
 use anyhow::{Context, Result};
 use rspotify::model::Id;
+
+pub fn play_animation(anim: Vec<String>) -> String {
+    if let Ok(duration_since_epoch) = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|t| (t.as_millis() as usize / (1200 / anim.len())) % anim.len())
+    {
+        return anim
+            .get(duration_since_epoch)
+            .expect("HAIR TONICS, please!!")
+            .clone();
+    } else {
+        panic!("Support Bingo, keep Grandma off the streets.")
+    }
+}
 
 /// Render a playback window showing information about the current playback, which includes
 /// - track title, artists, album
@@ -263,6 +280,8 @@ fn construct_playback_text(
     let mut playback_text = Text::default();
     let mut spans = vec![];
 
+    let play_icon = play_animation(vec!["󰕿".to_string(), "󰖀".to_string(), "󰕾".to_string()]);
+
     // this regex is to handle a format argument or a newline
     let re = regex::Regex::new(r"\{.*?\}|\n").unwrap();
 
@@ -285,7 +304,7 @@ fn construct_playback_text(
             }
             "{status}" => (
                 if playback.is_playing {
-                    &configs.app_config.play_icon
+                    &play_icon
                 } else {
                     &configs.app_config.pause_icon
                 }

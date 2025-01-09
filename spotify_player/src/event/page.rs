@@ -82,6 +82,13 @@ fn handle_action_for_library_page(
             ui,
             client_pub,
         ),
+        LibraryFocusState::SavedShows => window::handle_action_for_selected_item(
+            action,
+            &ui.search_filtered_items(&data.user_data.saved_shows),
+            &data,
+            ui,
+            client_pub,
+        ),
     }
 }
 
@@ -183,7 +190,6 @@ fn handle_command_for_library_page(
             )
         }
         LibraryFocusState::FollowedArtists => {
-            // Handle artist-specific commands
             let data = state.data.read();
             Ok(window::handle_command_for_artist_list_window(
                 command,
@@ -191,6 +197,16 @@ fn handle_command_for_library_page(
                 &data,
                 ui,
             ))
+        }
+        LibraryFocusState::SavedShows => {
+            let data = state.data.read();
+            Ok(window::handle_command_for_show_list_window(
+                command,
+                &ui.search_filtered_items(&data.user_data.saved_shows),
+                &data,
+                ui,
+            ))
+
         }
     }
 }

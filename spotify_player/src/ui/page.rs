@@ -9,7 +9,7 @@ use ratatui::text::Line;
 use crate::{state::Episode, utils::format_duration};
 
 use super::{
-    config, utils, utils::construct_and_render_block, Album, Alignment, Artist, ArtistFocusState,
+    config, playback::play_animation, utils, utils::construct_and_render_block, Album, Alignment, Artist, ArtistFocusState,
     Borders, BrowsePageUIState, Cell, Constraint, Context, ContextPageUIState, DataReadGuard,
     Frame, Id, Layout, LibraryFocusState, MutableWindowState, Orientation, PageState, Paragraph,
     PlaylistFolderItem, Rect, Row, SearchFocusState, SharedState, Style, Table, Text, Track,
@@ -392,7 +392,6 @@ pub fn render_library_page(
     // 1. Get data
     let curr_context_uri = state.player.read().playing_context_id().map(|c| c.uri());
     let data = state.data.read();
-    let configs = config::get_config();
 
     let (focus_state, playlist_folder_id) = match ui.current_page() {
         PageState::Library { state } => (state.focus, state.playlist_folder_id),
@@ -405,15 +404,14 @@ pub fn render_library_page(
     // - a saved albums window
     // - a followed artists window
 
+    // TODO: Adjust config to account for library page
     let chunks = ui
         .orientation
         .layout([
-            Constraint::Percentage(configs.app_config.layout.library.playlist_percent),
-            Constraint::Percentage(configs.app_config.layout.library.album_percent),
-            Constraint::Percentage(
-                100 - (configs.app_config.layout.library.album_percent
-                    + configs.app_config.layout.library.playlist_percent),
-            ),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
+            Constraint::Percentage(25),
         ])
         .split(rect);
 
@@ -437,8 +435,23 @@ pub fn render_library_page(
         frame,
         chunks[1],
     );
-    let artist_rect =
-        construct_and_render_block("Artists", &ui.theme, Borders::ALL, frame, chunks[2]);
+    let artist_rect = construct_and_render_block(
+        "Artists",
+        &ui.theme,
+        match ui.orientation {
+            Orientation::Horizontal => Borders::TOP | Borders::LEFT | Borders::BOTTOM,
+            Orientation::Vertical => Borders::ALL,
+        },
+        frame,
+        chunks[2],
+    );
+    let saved_shows_rect = construct_and_render_block(
+        "Saved Shows",
+        &ui.theme,
+        Borders::ALL,
+        frame,
+        chunks[3],
+    );
 
     // 3. Construct the page's widgets
     // Construct the playlist window
@@ -456,9 +469,7 @@ pub fn render_library_page(
     let (playlist_list, n_playlists) = utils::construct_list_widget(
         &ui.theme,
         items,
-        is_active
-            && focus_state != LibraryFocusState::SavedAlbums
-            && focus_state != LibraryFocusState::FollowedArtists,
+        is_active && focus_state == LibraryFocusState::Playlists,
     );
     // Construct the saved album window
     let (album_list, n_albums) = utils::construct_list_widget(
@@ -477,6 +488,15 @@ pub fn render_library_page(
             .map(|a| (a.to_bidi_string(), curr_context_uri == Some(a.id.uri())))
             .collect(),
         is_active && focus_state == LibraryFocusState::FollowedArtists,
+    );
+    // Construct the saved shows
+    let (saved_shows_list, n_shows) = utils::construct_list_widget(
+        &ui.theme,
+        ui.search_filtered_items(&data.user_data.saved_shows)
+            .into_iter()
+            .map(|a| (a.to_string(), curr_context_uri == Some(a.id.uri())))
+            .collect(),
+        is_active && focus_state == LibraryFocusState::SavedShows,
     );
 
     // 4. Render the page's widgets
@@ -506,6 +526,13 @@ pub fn render_library_page(
         artist_rect,
         n_artists,
         &mut page_state.followed_artist_list,
+    );
+    utils::render_list_window(
+        frame,
+        saved_shows_list,
+        saved_shows_rect,
+        n_shows,
+        &mut page_state.saved_shows_list,
     );
 }
 
@@ -948,6 +975,7 @@ fn render_track_table(
     // get the current playing track's URI to decorate such track (if exists) in the track table
     let mut playing_track_uri = String::new();
     let mut playing_id = "";
+    let play_icon = play_animation(vec!["󰕿".to_string(), "󰖀".to_string(), "󰕾".to_string()]);
     if let Some(ref playback) = state.player.read().playback {
         if let Some(rspotify::model::PlayableItem::Track(ref track)) = playback.item {
             playing_track_uri = track
@@ -957,7 +985,7 @@ fn render_track_table(
                 .unwrap_or_default();
 
             playing_id = if playback.is_playing {
-                &configs.app_config.play_icon
+                &play_icon
             } else {
                 &configs.app_config.pause_icon
             };
@@ -1089,12 +1117,13 @@ fn render_episode_table(
     // get the current playing episode's URI to decorate such episode (if exists) in the episode table
     let mut playing_episode_uri = String::new();
     let mut playing_id = "";
+    let play_icon = play_animation(vec!["󰕿".to_string(), "󰖀".to_string(), "󰕾".to_string()]);
     if let Some(ref playback) = state.player.read().playback {
         if let Some(rspotify::model::PlayableItem::Episode(ref episode)) = playback.item {
             playing_episode_uri = episode.id.uri();
 
             playing_id = if playback.is_playing {
-                &configs.app_config.play_icon
+                &play_icon
             } else {
                 &configs.app_config.pause_icon
             };
