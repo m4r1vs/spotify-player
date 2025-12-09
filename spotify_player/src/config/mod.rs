@@ -139,6 +139,8 @@ pub struct AppConfig {
     /// Requires streaming. When disabled, playback uses Spotify-native queue
     /// management.
     pub custom_queue: bool,
+
+    pub title: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -392,6 +394,8 @@ impl Default for AppConfig {
             enable_mouse_scroll_volume: true,
 
             custom_queue: true,
+
+            title: None,
         }
     }
 }
