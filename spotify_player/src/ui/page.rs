@@ -10,9 +10,9 @@ use crate::{state::Episode, utils::format_duration};
 
 use super::{
     config, playback::play_animation, utils, utils::construct_and_render_block, Album, Alignment, Artist, ArtistFocusState,
-    Borders, BrowsePageUIState, Cell, Constraint, Context, ContextPageUIState, DataReadGuard,
+    Block, Borders, BrowsePageUIState, Cell, Constraint, Context, ContextPageUIState, DataReadGuard,
     Frame, Id, Layout, LibraryFocusState, MutableWindowState, Orientation, PageState, Paragraph,
-    PlaylistFolderItem, Rect, Row, SearchFocusState, SharedState, Style, Table, Text, Track,
+    PlaylistFolderItem, PopupState, Rect, Row, SearchFocusState, SharedState, Style, Table, Text, Track,
     UIStateGuard,
 };
 use crate::state::BidiDisplay;
@@ -378,6 +378,202 @@ pub fn render_context_page(
         }
         None => {
             frame.render_widget(Paragraph::new("Loading..."), rect);
+        }
+    }
+}
+
+pub fn render_playlists_page(
+    is_active: bool,
+    frame: &mut Frame,
+    state: &SharedState,
+    ui: &mut UIStateGuard,
+    rect: Rect,
+) {
+    #[cfg(not(feature = "image"))]
+    {
+        let text = "The 'image' feature is required to view the Playlists page.";
+        let p = Paragraph::new(text)
+            .alignment(Alignment::Center)
+            .block(Block::default().borders(Borders::ALL).title("Playlists"));
+        frame.render_widget(p, rect);
+    }
+
+    #[cfg(feature = "image")]
+    {
+        let mut flat_playlists = vec![];
+        {
+            let data = state.data.read();
+            for item in &data.user_data.playlists {
+                if let PlaylistFolderItem::Playlist(p) = item {
+                    flat_playlists.push(p.clone());
+                }
+            }
+        }
+        let flat_playlists = ui.search_filtered_items(&flat_playlists);
+
+        if flat_playlists.is_empty() {
+            let text = if ui.popup.is_some() {
+                "No playlists found matching the query."
+            } else {
+                "Loading playlists..."
+            };
+            let p = Paragraph::new(text)
+                .alignment(Alignment::Center)
+                .block(Block::default().borders(Borders::ALL).title("Playlists"));
+            frame.render_widget(p, rect);
+            return;
+        }
+
+        let configs = crate::config::get_config();
+        let block = Block::default()
+            .title("Playlists")
+            .borders(Borders::ALL);
+        let inner_rect = block.inner(rect);
+        frame.render_widget(block, rect);
+
+        let (img_width, img_length, item_width, item_height, items_per_row) = {
+            let img_width = configs.app_config.cover_img_width as u16;
+            let img_length = configs.app_config.cover_img_length as u16;
+            let items_per_row = (inner_rect.width / (img_length + 2)).max(1) as usize;
+            let item_width = inner_rect.width / items_per_row as u16;
+            let img_length = item_width.saturating_sub(2);
+            let img_width = if configs.app_config.cover_img_length > 0 {
+                (img_length as f32 * configs.app_config.cover_img_width as f32
+                    / configs.app_config.cover_img_length as f32)
+                    .round() as u16
+            } else {
+                img_width
+            };
+            let item_height = img_width + 2;
+
+            (img_width, img_length, item_width, item_height, items_per_row)
+        };
+
+        if inner_rect.width < 3 || inner_rect.height < item_height {
+            return; // terminal too small
+        }
+
+        let selected_index = match ui.current_page_mut() {
+            PageState::Playlists { state } => {
+                if state.selected_index >= flat_playlists.len() {
+                    state.selected_index = flat_playlists.len().saturating_sub(1);
+                }
+                state.selected_index
+            }
+            _ => 0,
+        };
+
+        // Calculate visible rows
+        let _rows = (flat_playlists.len() + items_per_row - 1) / items_per_row;
+        let max_visible_rows = (inner_rect.height / item_height) as usize;
+        let selected_row = selected_index / items_per_row;
+
+        let start_row = if selected_row >= max_visible_rows {
+            selected_row - max_visible_rows + 1
+        } else {
+            0
+        };
+
+        let search_query = match ui.popup {
+            Some(PopupState::Search { ref query }) => query.clone(),
+            _ => String::new(),
+        };
+
+        let view_changed = (inner_rect, start_row, items_per_row, &search_query)
+            != (
+                ui.last_playlists_page_render_info.rect,
+                ui.last_playlists_page_render_info.start_row,
+                ui.last_playlists_page_render_info.items_per_row,
+                &ui.last_playlists_page_render_info.search_query,
+            );
+        if view_changed {
+            for area in &ui.last_playlists_page_render_info.render_areas {
+                super::utils::clear_area(frame, *area, &ui.theme);
+            }
+            ui.last_playlists_page_render_info.render_areas.clear();
+            ui.last_playlists_page_render_info.rect = inner_rect;
+            ui.last_playlists_page_render_info.start_row = start_row;
+            ui.last_playlists_page_render_info.items_per_row = items_per_row;
+            ui.last_playlists_page_render_info.search_query = search_query;
+            if let PageState::Playlists { state } = ui.current_page_mut() {
+                state.rendered = false;
+            }
+            // Reset the playback cover's rendered state to ensure it re-renders after a potential Kitty-wide clear command
+            ui.last_cover_image_render_info.rendered = false;
+        }
+
+        let mut all_images_rendered = true;
+        for (i, p) in flat_playlists.iter().enumerate() {
+            let row = i / items_per_row;
+            if row < start_row || row >= start_row + max_visible_rows {
+                continue;
+            }
+
+            let col = i % items_per_row;
+            let x = inner_rect.x + (col as u16 * item_width);
+            let y = inner_rect.y + ((row - start_row) as u16 * item_height);
+
+            let cover_rect = Rect::new(x, y, img_length, img_width);
+            let title_rect = Rect::new(x, y + img_width, img_length, 1);
+
+            let mut style = Style::default();
+            if i == selected_index && is_active {
+                style = ui.theme.selection(true);
+            }
+
+            let title = p.name.clone();
+            frame.render_widget(
+                Paragraph::new(ratatui::text::Span::styled(title, style)),
+                title_rect,
+            );
+
+            if let Some(url) = &p.cover_url {
+                let image = state.data.read().caches.images.get(url).cloned();
+
+                if let Some(image) = image {
+                    let is_already_rendered = ui.last_playlists_page_render_info.render_areas.contains(&cover_rect);
+                    if !is_already_rendered {
+                        let scale = configs.app_config.cover_img_scale;
+                        let _ = viuer::print(
+                            &image,
+                            &viuer::Config {
+                                x: cover_rect.x,
+                                y: cover_rect.y as i16,
+                                width: Some((f32::from(cover_rect.width) * scale).round() as u32),
+                                height: Some((f32::from(cover_rect.height) * scale).round() as u32),
+                                restore_cursor: true,
+                                transparent: true,
+                                ..Default::default()
+                            },
+                        );
+                        ui.last_playlists_page_render_info.render_areas.push(cover_rect);
+                    }
+
+                    for cx in cover_rect.left()..cover_rect.right() {
+                        for cy in cover_rect.top()..cover_rect.bottom() {
+                            if let Some(cell) = frame.buffer_mut().cell_mut((cx, cy)) {
+                                cell.set_skip(true);
+                            }
+                        }
+                    }
+                } else {
+                    all_images_rendered = false;
+                    let is_rendered = match ui.current_page() {
+                        PageState::Playlists { state } => state.rendered,
+                        _ => false,
+                    };
+                    if !is_rendered {
+                        state.client_sender.send(crate::client::ClientRequest::LoadImage(url.clone())).unwrap_or_default();
+                    }
+                }
+            }
+        }
+
+        if let PageState::Playlists { state } = ui.current_page_mut() {
+            if all_images_rendered {
+                state.rendered = true;
+                ui.last_playlists_page_render_info.rendered = true;
+            }
         }
     }
 }

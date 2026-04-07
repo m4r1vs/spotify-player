@@ -197,6 +197,10 @@ impl Default for KeymapConfig {
                     command: Command::BrowsePage,
                 },
                 Keymap {
+                    key_sequence: "g p".into(),
+                    command: Command::PlaylistsPage,
+                },
+                Keymap {
                     key_sequence: "backspace".into(),
                     command: Command::PreviousPage,
                 },

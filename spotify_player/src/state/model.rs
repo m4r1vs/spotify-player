@@ -174,6 +174,7 @@ pub struct Playlist {
     #[serde(default)]
     pub current_folder_id: usize,
     pub snapshot_id: String,
+    pub cover_url: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -541,6 +542,7 @@ impl BidiDisplay for Artist {}
 
 impl From<rspotify::model::SimplifiedPlaylist> for Playlist {
     fn from(playlist: rspotify::model::SimplifiedPlaylist) -> Self {
+        let cover_url = playlist.images.first().map(|image| image.url.clone());
         Self {
             id: playlist.id,
             name: playlist.name,
@@ -552,6 +554,7 @@ impl From<rspotify::model::SimplifiedPlaylist> for Playlist {
             desc: String::new(),
             current_folder_id: 0,
             snapshot_id: playlist.snapshot_id,
+            cover_url,
         }
     }
 }
@@ -562,6 +565,7 @@ impl From<rspotify::model::FullPlaylist> for Playlist {
         let re = regex::Regex::new("(<.*?>|</.*?>)").expect("valid regex");
         let desc = playlist.description.unwrap_or_default();
         let desc = decode_html_entities(&re.replace_all(&desc, "")).to_string();
+        let cover_url = playlist.images.first().map(|image| image.url.clone());
 
         Self {
             id: playlist.id,
@@ -574,6 +578,7 @@ impl From<rspotify::model::FullPlaylist> for Playlist {
             desc,
             current_folder_id: 0,
             snapshot_id: playlist.snapshot_id,
+            cover_url,
         }
     }
 }

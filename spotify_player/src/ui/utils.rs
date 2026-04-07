@@ -50,6 +50,29 @@ pub fn construct_and_render_block(
     inner_rect
 }
 
+pub fn clear_area(frame: &mut Frame, rect: Rect, theme: &config::Theme) {
+    for x in rect.left()..rect.right() {
+        for y in rect.top()..rect.bottom() {
+            if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
+                cell.set_char(' ').set_style(theme.app()).set_skip(false);
+            }
+        }
+    }
+    // Explicitly clear images in the area for terminals supporting Kitty graphics protocol.
+    // We move the cursor to each cell and send the "delete image at cursor" command.
+    // This is more reliable than "delete by cell coordinates" which can sometimes have coordinate mismatches.
+    use std::io::Write;
+    let mut stdout = std::io::stdout();
+    for x in rect.left()..rect.right() {
+        for y in rect.top()..rect.bottom() {
+            // \x1b[{y+1};{x+1}H moves cursor to 1-based (y, x)
+            // \x1b_Ga=d,d=c\x1b\\ deletes image at current cursor position
+            let _ = write!(stdout, "\x1b[{};{}H\x1b_Ga=d,d=c\x1b\\", y + 1, x + 1);
+        }
+    }
+    let _ = stdout.flush();
+}
+
 /// Construct a generic list widget
 pub fn construct_list_widget<'a>(
     theme: &config::Theme,

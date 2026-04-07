@@ -70,7 +70,7 @@ impl MemoryCaches {
             lyrics: ttl_cache::TtlCache::new(64),
             genres: ttl_cache::TtlCache::new(64),
             #[cfg(feature = "image")]
-            images: ttl_cache::TtlCache::new(64),
+            images: ttl_cache::TtlCache::new(256),
         }
     }
 }

@@ -3,7 +3,7 @@ mod data;
 mod model;
 mod player;
 mod queue;
-mod ui;
+pub mod ui;
 
 use std::{collections::VecDeque, sync::Arc};
 
@@ -27,6 +27,7 @@ pub struct State {
     pub ui: Mutex<UIState>,
     pub player: RwLock<PlayerState>,
     pub data: RwLock<AppData>,
+    pub client_sender: flume::Sender<crate::client::ClientRequest>,
 
     pub is_daemon: bool,
 
@@ -40,7 +41,11 @@ pub struct State {
 }
 
 impl State {
-    pub fn new(is_daemon: bool, log_buffer: Arc<Mutex<VecDeque<String>>>) -> Self {
+    pub fn new(
+        client_sender: flume::Sender<crate::client::ClientRequest>,
+        is_daemon: bool,
+        log_buffer: Arc<Mutex<VecDeque<String>>>,
+    ) -> Self {
         let mut ui = UIState::default();
         let configs = config::get_config();
 
@@ -49,12 +54,22 @@ impl State {
             ui.theme = theme;
         }
 
+        ui.history = vec![match configs.app_config.default_page.as_str() {
+            "Playlists" => crate::state::ui::PageState::Playlists {
+                state: crate::state::ui::PlaylistsPageUIState::new(),
+            },
+            _ => crate::state::ui::PageState::Library {
+                state: crate::state::ui::LibraryPageUIState::new(),
+            },
+        }];
+
         let app_data = AppData::new(&configs.cache_folder);
 
         Self {
             ui: Mutex::new(ui),
             player: RwLock::new(PlayerState::default()),
             data: RwLock::new(app_data),
+            client_sender,
             is_daemon,
             #[cfg(feature = "streaming")]
             vis_bands: if configs.app_config.enable_audio_visualization {

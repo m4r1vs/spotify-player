@@ -30,6 +30,9 @@ pub enum PageState {
     Queue {
         scroll_offset: usize,
     },
+    Playlists {
+        state: PlaylistsPageUIState,
+    },
     CommandHelp {
         scroll_offset: usize,
     },
@@ -38,7 +41,7 @@ pub enum PageState {
     },
 }
 
-#[derive(PartialEq, Eq, Clone, Copy)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, serde::Serialize, serde::Deserialize)]
 pub enum PageType {
     Library,
     Context,
@@ -46,6 +49,7 @@ pub enum PageType {
     Browse,
     Lyrics,
     Queue,
+    Playlists,
     CommandHelp,
     Logs,
 }
@@ -69,6 +73,21 @@ pub struct SearchPageUIState {
     pub show_list: ListState,
     pub episode_list: ListState,
     pub focus: SearchFocusState,
+}
+
+#[derive(Clone, Debug)]
+pub struct PlaylistsPageUIState {
+    pub selected_index: usize,
+    pub rendered: bool,
+}
+
+impl PlaylistsPageUIState {
+    pub fn new() -> Self {
+        Self {
+            selected_index: 0,
+            rendered: false,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -152,6 +171,7 @@ impl PageState {
             PageState::Browse { .. } => PageType::Browse,
             PageState::Lyrics { .. } => PageType::Lyrics,
             PageState::Queue { .. } => PageType::Queue,
+            PageState::Playlists { .. } => PageType::Playlists,
             PageState::CommandHelp { .. } => PageType::CommandHelp,
             PageState::Logs { .. } => PageType::Logs,
         }
@@ -161,6 +181,9 @@ impl PageState {
     pub fn select(&mut self, id: usize) {
         if let Some(mut state) = self.focus_window_state_mut() {
             state.select(id);
+        }
+        if let Self::Playlists { state } = self {
+            state.rendered = false;
         }
     }
 
@@ -244,6 +267,7 @@ impl PageState {
             Self::CommandHelp { scroll_offset }
             | Self::Queue { scroll_offset }
             | Self::Logs { scroll_offset } => Some(MutableWindowState::Scroll(scroll_offset)),
+            Self::Playlists { state } => Some(MutableWindowState::Scroll(&mut state.selected_index)),
         }
     }
 }

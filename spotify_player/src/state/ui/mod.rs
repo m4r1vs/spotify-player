@@ -22,6 +22,17 @@ pub struct ImageRenderInfo {
     pub rendered: bool,
 }
 
+#[derive(Default, Debug)]
+#[cfg(feature = "image")]
+pub struct PlaylistsPageRenderInfo {
+    pub render_areas: Vec<ratatui::layout::Rect>,
+    pub rendered: bool,
+    pub start_row: usize,
+    pub items_per_row: usize,
+    pub rect: ratatui::layout::Rect,
+    pub search_query: String,
+}
+
 /// Application's UI state
 #[derive(Debug)]
 pub struct UIState {
@@ -42,6 +53,8 @@ pub struct UIState {
 
     #[cfg(feature = "image")]
     pub last_cover_image_render_info: ImageRenderInfo,
+    #[cfg(feature = "image")]
+    pub last_playlists_page_render_info: PlaylistsPageRenderInfo,
 }
 
 impl UIState {
@@ -111,6 +124,8 @@ impl Default for UIState {
 
             #[cfg(feature = "image")]
             last_cover_image_render_info: ImageRenderInfo::default(),
+            #[cfg(feature = "image")]
+            last_playlists_page_render_info: PlaylistsPageRenderInfo::default(),
         }
     }
 }

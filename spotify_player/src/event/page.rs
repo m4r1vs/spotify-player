@@ -32,6 +32,7 @@ pub fn handle_key_sequence_for_page(
             PageType::Queue => Ok(handle_command_for_queue_page(command, ui)),
             PageType::CommandHelp => Ok(handle_command_for_command_help_page(command, ui)),
             PageType::Logs => Ok(handle_command_for_logs_page(command, ui)),
+            PageType::Playlists => Ok(handle_command_for_playlists_page(command, client_pub, ui, state)),
         },
         Some(CommandOrAction::Action(action, ActionTarget::SelectedItem)) => match page_type {
             PageType::Search => anyhow::bail!("page search type should already be handled!"),
@@ -578,6 +579,56 @@ fn handle_command_for_logs_page(command: Command, ui: &mut UIStateGuard) -> bool
     };
     let count = ui.count_prefix;
     handle_navigation_command(command, ui.current_page_mut(), scroll_offset, 10000, count)
+}
+
+fn handle_command_for_playlists_page(
+    command: Command,
+    client_pub: &flume::Sender<ClientRequest>,
+    ui: &mut UIStateGuard,
+    state: &SharedState,
+) -> bool {
+    if command == Command::Search {
+        ui.new_search_popup();
+        return true;
+    }
+
+    let (selected_index, count_prefix) = match ui.current_page() {
+        PageState::Playlists { state } => (state.selected_index, ui.count_prefix),
+        _ => return false,
+    };
+
+    let data = state.data.read();
+    let mut flat_playlists = vec![];
+    for item in &data.user_data.playlists {
+        if let PlaylistFolderItem::Playlist(p) = item {
+            flat_playlists.push(p);
+        }
+    }
+    let flat_playlists = ui.search_filtered_items(&flat_playlists);
+
+    if command == Command::ChooseSelected {
+        if let Some(p) = flat_playlists.get(selected_index) {
+            let context_id = ContextId::Playlist(p.id.clone());
+            ui.new_page(PageState::Context {
+                id: None,
+                context_page_type: ContextPageType::Browsing(context_id.clone()),
+                state: None,
+            });
+            client_pub
+                .send(ClientRequest::GetContext(context_id))
+                .unwrap_or_default();
+        }
+        return true;
+    }
+
+    let n_playlists = flat_playlists.len();
+    handle_navigation_command(
+        command,
+        ui.current_page_mut(),
+        selected_index,
+        n_playlists,
+        count_prefix,
+    )
 }
 
 pub fn handle_navigation_command(

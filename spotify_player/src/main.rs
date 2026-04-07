@@ -96,7 +96,11 @@ fn init_logging(
 }
 
 #[tokio::main]
-async fn start_app(state: &state::SharedState) -> Result<()> {
+async fn start_app(
+    state: &state::SharedState,
+    client_pub: flume::Sender<client::ClientRequest>,
+    client_sub: flume::Receiver<client::ClientRequest>,
+) -> Result<()> {
     if !state.is_daemon {
         #[cfg(feature = "image")]
         {
@@ -107,9 +111,6 @@ async fn start_app(state: &state::SharedState) -> Result<()> {
             viuer::is_sixel_supported();
         }
     }
-
-    // client channels
-    let (client_pub, client_sub) = flume::unbounded::<client::ClientRequest>();
 
     #[cfg(feature = "pulseaudio-backend")]
     {
@@ -326,8 +327,11 @@ fn main() -> Result<()> {
                 is_daemon = false;
             }
 
-            let state = std::sync::Arc::new(state::State::new(is_daemon, log_buffer));
-            start_app(&state)
+            // client channels
+            let (client_pub, client_sub) = flume::unbounded::<client::ClientRequest>();
+
+            let state = std::sync::Arc::new(state::State::new(client_pub.clone(), is_daemon, log_buffer));
+            start_app(&state, client_pub, client_sub)
         }
         Some((cmd, args)) => cli::handle_cli_subcommand(cmd, args),
     }

@@ -122,6 +122,7 @@ pub struct AppConfig {
     pub enable_cover_image_cache: bool,
 
     pub default_device: String,
+    pub default_page: String,
 
     pub device: DeviceConfig,
 
@@ -380,6 +381,7 @@ impl Default for AppConfig {
             enable_cover_image_cache: true,
 
             default_device: "spotify-player".to_string(),
+            default_page: "Library".to_string(),
 
             device: DeviceConfig::default(),
 
@@ -520,7 +522,7 @@ pub fn get_config() -> &'static Configs {
 pub fn set_config(configs: Configs) {
     CONFIGS
         .set(configs)
-        .expect("configs should be initialized only once");
+        .expect("configs should be initialized once");
 }
 
 // Apply a CLI config override to the application config.

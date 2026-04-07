@@ -56,6 +56,9 @@ pub fn run(state: &SharedState) -> Result<()> {
                 {
                     // redraw the cover image when the terminal's size changes
                     ui.last_cover_image_render_info = ImageRenderInfo::default();
+                    if let PageState::Playlists { state } = ui.current_page_mut() {
+                        state.rendered = false;
+                    }
                 }
             }
 
@@ -139,8 +142,21 @@ fn render_main_layout(
     rect: Rect,
 ) {
     let page_type = ui.current_page().page_type();
+
+    #[cfg(feature = "image")]
+    {
+        if page_type != PageType::Playlists && !ui.last_playlists_page_render_info.render_areas.is_empty() {
+            for area in &ui.last_playlists_page_render_info.render_areas {
+                utils::clear_area(frame, *area, &ui.theme);
+            }
+            ui.last_playlists_page_render_info.rendered = false;
+            ui.last_playlists_page_render_info.render_areas.clear();
+        }
+    }
+
     match page_type {
         PageType::Library => page::render_library_page(is_active, frame, state, ui, rect),
+        PageType::Playlists => page::render_playlists_page(is_active, frame, state, ui, rect),
         PageType::Search => page::render_search_page(is_active, frame, state, ui, rect),
         PageType::Context => page::render_context_page(is_active, frame, state, ui, rect),
         PageType::Browse => page::render_browse_page(is_active, frame, state, ui, rect),

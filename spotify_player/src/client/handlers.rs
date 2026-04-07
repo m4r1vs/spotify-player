@@ -36,7 +36,7 @@ pub async fn start_client_handler(
 
         tokio::task::spawn(
             async move {
-                if let Err(err) = client.handle_request(&state, request).await {
+                if let Err(err) = client.handle_request(state, request).await {
                     tracing::error!("Failed to handle client request: {err:#}");
                 }
             }

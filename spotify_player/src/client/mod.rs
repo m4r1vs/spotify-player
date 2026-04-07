@@ -360,7 +360,7 @@ impl AppClient {
     /// Handle a client request
     pub(crate) async fn handle_request(
         &self,
-        state: &SharedState,
+        state: SharedState,
         request: ClientRequest,
     ) -> Result<()> {
         let timer = tokio::time::Instant::now();
@@ -381,7 +381,8 @@ impl AppClient {
             }
             ClientRequest::GetLyrics { track_id } => {
                 let uri = track_id.uri();
-                if !state.data.read().caches.lyrics.contains_key(&uri) {
+                let cache_miss = !state.data.read().caches.lyrics.contains_key(&uri);
+                if cache_miss {
                     let lyrics = self.lyrics(track_id).await?;
                     state
                         .data
@@ -393,20 +394,20 @@ impl AppClient {
             }
             #[cfg(feature = "streaming")]
             ClientRequest::RestartIntegratedClient => {
-                self.new_session(Some(state), false).await?;
+                self.new_session(Some(&state), false).await?;
             }
             ClientRequest::GetCurrentUser => {
                 let user = self.current_user().await?;
                 state.data.write().user_data.user = Some(user);
             }
             ClientRequest::Player(request) => {
-                let playback = state.player.read().buffered_playback.clone();
+                let playback = { state.player.read().buffered_playback.clone() };
                 let playback = self.handle_player_request(request, playback).await?;
                 state.player.write().buffered_playback = playback;
-                self.update_playback(state);
+                self.update_playback(&state);
             }
             ClientRequest::GetCurrentPlayback => {
-                self.retrieve_current_playback(state, true).await?;
+                self.retrieve_current_playback(&state, true).await?;
             }
             ClientRequest::GetDevices => {
                 #[allow(unused_mut)]
@@ -439,12 +440,27 @@ impl AppClient {
                 state.player.write().devices = devices;
             }
             ClientRequest::GetUserPlaylists => {
-                let playlists = self.current_user_playlists().await?;
+                let raw_playlists = self.current_user_playlists().await?;
+                #[cfg(feature = "image")]
+                {
+                    for p in &raw_playlists {
+                        if let Some(url) = &p.cover_url {
+                            let client = self.clone();
+                            let state = state.clone();
+                            let url = url.clone();
+                            tokio::spawn(async move {
+                                let contains = state.data.read().caches.images.contains_key(&url);
+                                if !contains {
+                                   let _ = client.load_image_internal(state, url).await;
+                                }                            });
+                        }
+                    }
+                }
                 let node = state.data.read().user_data.playlist_folder_node.clone();
                 let playlists = if let Some(node) = node.filter(|n| !n.children.is_empty()) {
-                    crate::playlist_folders::structurize(playlists, &node.children)
+                    crate::playlist_folders::structurize(raw_playlists, &node.children)
                 } else {
-                    playlists
+                    raw_playlists
                         .into_iter()
                         .map(PlaylistFolderItem::Playlist)
                         .collect()
@@ -545,7 +561,8 @@ impl AppClient {
                 }
             }
             ClientRequest::Search(query) => {
-                if !state.data.read().caches.search.contains_key(&query) {
+                let cache_miss = !state.data.read().caches.search.contains_key(&query);
+                if cache_miss {
                     let results = self.search(&query).await?;
 
                     state
@@ -561,7 +578,7 @@ impl AppClient {
                 self.add_item_to_queue(playable_id, None).await?;
             }
             ClientRequest::AddPlayableToPlaylist(playlist_id, playable_id) => {
-                self.add_item_to_playlist(state, playlist_id, playable_id)
+                self.add_item_to_playlist(&state, playlist_id, playable_id)
                     .await?;
             }
             ClientRequest::AddAlbumToQueue(album_id) => {
@@ -575,14 +592,14 @@ impl AppClient {
                 }
             }
             ClientRequest::DeleteTrackFromPlaylist(playlist_id, track_id) => {
-                self.delete_track_from_playlist(state, playlist_id, track_id)
+                self.delete_track_from_playlist(&state, playlist_id, track_id)
                     .await?;
             }
             ClientRequest::AddToLibrary(item) => {
-                self.add_to_library(state, item).await?;
+                self.add_to_library(&state, item).await?;
             }
             ClientRequest::DeleteFromLibrary(id) => {
-                self.delete_from_library(state, id).await?;
+                self.delete_from_library(&state, id).await?;
             }
             ClientRequest::GetCurrentUserQueue => {
                 let queue = self.current_user_queue().await?;
@@ -596,7 +613,7 @@ impl AppClient {
                 snapshot_id,
             } => {
                 self.reorder_playlist_items(
-                    state,
+                    &state,
                     playlist_id,
                     insert_index,
                     range_start,
@@ -620,7 +637,7 @@ impl AppClient {
                     .map(|u| u.id.clone())
                     .unwrap();
                 self.create_new_playlist(
-                    state,
+                    &state,
                     user_id,
                     playlist_name.as_str(),
                     public,
@@ -628,6 +645,13 @@ impl AppClient {
                     desc.as_str(),
                 )
                 .await?;
+            }
+            #[cfg(feature = "image")]
+            ClientRequest::LoadImage(url) => {
+                let contains = state.data.read().caches.images.contains_key(&url);
+                if !contains {
+                    self.load_image_internal(state, url).await?;
+                }
             }
         }
 
@@ -1746,27 +1770,30 @@ impl AppClient {
         }
 
         #[cfg(feature = "image")]
-        if !state.data.read().caches.images.contains_key(url) {
-            let bytes = self.retrieve_image(url, &path, false).await?;
+        {
+            let cache_miss = !state.data.read().caches.images.contains_key(url);
+            if cache_miss {
+                let bytes = self.retrieve_image(url, &path, false).await?;
 
-            #[cfg(not(feature = "pixelate"))]
-            let image =
-                image::load_from_memory(&bytes).context("Failed to load image from memory")?;
-            #[cfg(feature = "pixelate")]
-            let mut image =
-                image::load_from_memory(&bytes).context("Failed to load image from memory")?;
+                #[cfg(not(feature = "pixelate"))]
+                let image =
+                    image::load_from_memory(&bytes).context("Failed to load image from memory")?;
+                #[cfg(feature = "pixelate")]
+                let mut image =
+                    image::load_from_memory(&bytes).context("Failed to load image from memory")?;
 
-            #[cfg(feature = "pixelate")]
-            {
-                Self::pixelate_image(&mut image);
+                #[cfg(feature = "pixelate")]
+                {
+                    Self::pixelate_image(&mut image);
+                }
+
+                state
+                    .data
+                    .write()
+                    .caches
+                    .images
+                    .insert(url.to_owned(), image, *TTL_CACHE_DURATION);
             }
-
-            state
-                .data
-                .write()
-                .caches
-                .images
-                .insert(url.to_owned(), image, *TTL_CACHE_DURATION);
         }
 
         // notify user about the playback's change if any
@@ -1967,6 +1994,26 @@ impl AppClient {
         }
 
         albums
+    }
+    #[cfg(feature = "image")]
+    pub(crate) async fn load_image_internal(&self, state: SharedState, url: String) -> Result<()> {
+        let configs = config::get_config();
+        let filename = url.replace('/', "");
+        let path = configs.cache_folder.join("image").join(filename);
+        let bytes = self.retrieve_image(&url, &path, configs.app_config.enable_cover_image_cache).await?;
+        
+        #[cfg(not(feature = "pixelate"))]
+        let image = image::load_from_memory(&bytes).context("Failed to load image from memory")?;
+        #[cfg(feature = "pixelate")]
+        let mut image = image::load_from_memory(&bytes).context("Failed to load image from memory")?;
+        
+        #[cfg(feature = "pixelate")]
+        {
+            Self::pixelate_image(&mut image);
+        }
+        
+        state.data.write().caches.images.insert(url, image, *TTL_CACHE_DURATION);
+        Ok(())
     }
 }
 
