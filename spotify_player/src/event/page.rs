@@ -41,6 +41,7 @@ pub fn handle_key_sequence_for_page(
                 window::handle_action_for_focused_context_page(action, client_pub, ui, state)
             }
             PageType::Browse => handle_action_for_browse_page(action, client_pub, ui, state),
+            PageType::Playlists => handle_action_for_playlists_page(action, client_pub, ui, state),
             _ => Ok(false),
         },
         _ => Ok(false),
@@ -474,6 +475,35 @@ fn handle_action_for_browse_page(
     }
 }
 
+fn handle_action_for_playlists_page(
+    action: Action,
+    client_pub: &flume::Sender<ClientRequest>,
+    ui: &mut UIStateGuard,
+    state: &SharedState,
+) -> Result<bool> {
+    let data = state.data.read();
+    let flat_playlists = data
+        .user_data
+        .playlists
+        .iter()
+        .filter_map(|item| {
+            if let PlaylistFolderItem::Playlist(p) = item {
+                Some(p.clone())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    window::handle_action_for_selected_item(
+        action,
+        &ui.search_filtered_items(&flat_playlists),
+        &data,
+        ui,
+        client_pub,
+    )
+}
+
 fn handle_command_for_browse_page(
     command: Command,
     client_pub: &flume::Sender<ClientRequest>,
@@ -622,6 +652,41 @@ fn handle_command_for_playlists_page(
     }
 
     let n_playlists = flat_playlists.len();
+    if n_playlists == 0 {
+        return false;
+    }
+
+    #[cfg(feature = "image")]
+    {
+        let items_per_row = ui.last_playlists_page_render_info.items_per_row;
+        let offset = count_prefix.unwrap_or(1);
+
+        match command {
+            Command::SelectNextOrScrollDown => {
+                let new_index =
+                    std::cmp::min(selected_index + offset * items_per_row, n_playlists - 1);
+                ui.current_page_mut().select(new_index);
+                return true;
+            }
+            Command::SelectPreviousOrScrollUp => {
+                let new_index = selected_index.saturating_sub(offset * items_per_row);
+                ui.current_page_mut().select(new_index);
+                return true;
+            }
+            Command::FocusNextWindow => {
+                let new_index = std::cmp::min(selected_index + offset, n_playlists - 1);
+                ui.current_page_mut().select(new_index);
+                return true;
+            }
+            Command::FocusPreviousWindow => {
+                let new_index = selected_index.saturating_sub(offset);
+                ui.current_page_mut().select(new_index);
+                return true;
+            }
+            _ => {}
+        }
+    }
+
     handle_navigation_command(
         command,
         ui.current_page_mut(),

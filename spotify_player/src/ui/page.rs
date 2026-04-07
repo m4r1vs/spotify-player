@@ -12,9 +12,11 @@ use super::{
     config, playback::play_animation, utils, utils::construct_and_render_block, Album, Alignment, Artist, ArtistFocusState,
     Block, Borders, BrowsePageUIState, Cell, Constraint, Context, ContextPageUIState, DataReadGuard,
     Frame, Id, Layout, LibraryFocusState, MutableWindowState, Orientation, PageState, Paragraph,
-    PlaylistFolderItem, PopupState, Rect, Row, SearchFocusState, SharedState, Style, Table, Text, Track,
+    PlaylistFolderItem, Rect, Row, SearchFocusState, SharedState, Style, Table, Text, Track,
     UIStateGuard,
 };
+#[cfg(feature = "image")]
+use super::PopupState;
 use crate::state::BidiDisplay;
 use crate::ui::utils::to_bidi_string;
 
@@ -383,10 +385,10 @@ pub fn render_context_page(
 }
 
 pub fn render_playlists_page(
-    is_active: bool,
-    frame: &mut Frame,
-    state: &SharedState,
-    ui: &mut UIStateGuard,
+    _is_active: bool,
+    _frame: &mut Frame,
+    _state: &SharedState,
+    _ui: &mut UIStateGuard,
     rect: Rect,
 ) {
     #[cfg(not(feature = "image"))]
@@ -395,11 +397,15 @@ pub fn render_playlists_page(
         let p = Paragraph::new(text)
             .alignment(Alignment::Center)
             .block(Block::default().borders(Borders::ALL).title("Playlists"));
-        frame.render_widget(p, rect);
+        _frame.render_widget(p, rect);
     }
 
     #[cfg(feature = "image")]
     {
+        let is_active = _is_active;
+        let frame = _frame;
+        let state = _state;
+        let ui = _ui;
         let mut flat_playlists = vec![];
         {
             let data = state.data.read();
@@ -434,7 +440,8 @@ pub fn render_playlists_page(
         let (img_width, img_length, item_width, item_height, items_per_row) = {
             let img_width = configs.app_config.cover_img_width as u16;
             let img_length = configs.app_config.cover_img_length as u16;
-            let items_per_row = (inner_rect.width / (img_length + 2)).max(1) as usize;
+            // increase items per row by sqrt(2) to approximately double the number of items per page
+            let items_per_row = ((inner_rect.width / (img_length + 2)).max(1) as f32 * 1.414).round() as usize;
             let item_width = inner_rect.width / items_per_row as u16;
             let img_length = item_width.saturating_sub(2);
             let img_width = if configs.app_config.cover_img_length > 0 {
@@ -464,26 +471,22 @@ pub fn render_playlists_page(
         };
 
         // Calculate visible rows
-        let _rows = (flat_playlists.len() + items_per_row - 1) / items_per_row;
         let max_visible_rows = (inner_rect.height / item_height) as usize;
         let selected_row = selected_index / items_per_row;
 
-        let start_row = if selected_row >= max_visible_rows {
-            selected_row - max_visible_rows + 1
-        } else {
-            0
-        };
+        let start_row = (selected_row / max_visible_rows) * max_visible_rows;
 
         let search_query = match ui.popup {
             Some(PopupState::Search { ref query }) => query.clone(),
             _ => String::new(),
         };
 
-        let view_changed = (inner_rect, start_row, items_per_row, &search_query)
+        let view_changed = (inner_rect, start_row, items_per_row, max_visible_rows, &search_query)
             != (
                 ui.last_playlists_page_render_info.rect,
                 ui.last_playlists_page_render_info.start_row,
                 ui.last_playlists_page_render_info.items_per_row,
+                ui.last_playlists_page_render_info.max_visible_rows,
                 &ui.last_playlists_page_render_info.search_query,
             );
         if view_changed {
@@ -494,6 +497,7 @@ pub fn render_playlists_page(
             ui.last_playlists_page_render_info.rect = inner_rect;
             ui.last_playlists_page_render_info.start_row = start_row;
             ui.last_playlists_page_render_info.items_per_row = items_per_row;
+            ui.last_playlists_page_render_info.max_visible_rows = max_visible_rows;
             ui.last_playlists_page_render_info.search_query = search_query;
             if let PageState::Playlists { state } = ui.current_page_mut() {
                 state.rendered = false;
@@ -505,11 +509,12 @@ pub fn render_playlists_page(
         let mut all_images_rendered = true;
         for (i, p) in flat_playlists.iter().enumerate() {
             let row = i / items_per_row;
+            let col = i % items_per_row;
+
             if row < start_row || row >= start_row + max_visible_rows {
                 continue;
             }
 
-            let col = i % items_per_row;
             let x = inner_rect.x + (col as u16 * item_width);
             let y = inner_rect.y + ((row - start_row) as u16 * item_height);
 

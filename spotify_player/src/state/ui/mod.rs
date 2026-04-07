@@ -29,6 +29,7 @@ pub struct PlaylistsPageRenderInfo {
     pub rendered: bool,
     pub start_row: usize,
     pub items_per_row: usize,
+    pub max_visible_rows: usize,
     pub rect: ratatui::layout::Rect,
     pub search_query: String,
 }
