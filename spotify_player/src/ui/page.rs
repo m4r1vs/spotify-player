@@ -507,35 +507,51 @@ pub fn render_playlists_page(
         }
 
         let mut all_images_rendered = true;
+        let content_width = (items_per_row as u16).saturating_sub(1) * item_width + img_length;
+        let left_margin = inner_rect.width.saturating_sub(content_width) / 2;
+
         for (i, p) in flat_playlists.iter().enumerate() {
             let row = i / items_per_row;
             let col = i % items_per_row;
 
-            if row < start_row || row >= start_row + max_visible_rows {
+            let y_offset = (row.saturating_sub(start_row)) as u16 * item_height;
+            if row < start_row || y_offset >= inner_rect.height {
                 continue;
             }
 
-            let x = inner_rect.x + (col as u16 * item_width);
-            let y = inner_rect.y + ((row - start_row) as u16 * item_height);
+            let x = inner_rect.x + left_margin + (col as u16 * item_width);
+            let y = inner_rect.y + y_offset;
 
-            let cover_rect = Rect::new(x, y, img_length, img_width);
-            let title_rect = Rect::new(x, y + img_width, img_length, 1);
+            let available_height = inner_rect.height.saturating_sub(y_offset);
+            let available_cover_height = available_height.min(img_width);
 
-            let mut style = Style::default();
-            if i == selected_index && is_active {
-                style = ui.theme.selection(true);
+            let cover_rect = Rect::new(x, y, img_length, available_cover_height);
+
+            if available_height > img_width {
+                let title_rect = Rect::new(x, y + img_width, img_length, 1);
+                let mut style = Style::default();
+                if i == selected_index && is_active {
+                    style = ui.theme.selection(true);
+                }
+
+                let title = p.name.clone();
+                frame.render_widget(
+                    Paragraph::new(ratatui::text::Span::styled(title, style)),
+                    title_rect,
+                );
             }
-
-            let title = p.name.clone();
-            frame.render_widget(
-                Paragraph::new(ratatui::text::Span::styled(title, style)),
-                title_rect,
-            );
 
             if let Some(url) = &p.cover_url {
                 let image = state.data.read().caches.images.get(url).cloned();
 
-                if let Some(image) = image {
+                if let Some(mut image) = image {
+                    if available_cover_height < img_width {
+                        use image::GenericImageView;
+                        let (w, h) = image.dimensions();
+                        let crop_h = (h as f32 * (available_cover_height as f32 / img_width as f32)).round() as u32;
+                        image = image.crop_imm(0, 0, w, crop_h);
+                    }
+
                     let is_already_rendered = ui.last_playlists_page_render_info.render_areas.contains(&cover_rect);
                     if !is_already_rendered {
                         let scale = configs.app_config.cover_img_scale;
