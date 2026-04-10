@@ -864,10 +864,17 @@ impl AppClient {
             )
             .await?;
 
-        Ok(playlists
-            .into_iter()
-            .map(std::convert::Into::into)
-            .collect())
+        let mut unique_playlists = Vec::new();
+        let mut seen_names = HashSet::new();
+
+        for p in playlists {
+            let playlist: Playlist = p.into();
+            if seen_names.insert(playlist.name.clone()) {
+                unique_playlists.push(playlist);
+            }
+        }
+
+        Ok(unique_playlists)
     }
 
     /// Get all followed artists of the current user
