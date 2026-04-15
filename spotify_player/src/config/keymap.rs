@@ -88,6 +88,10 @@ impl Default for KeymapConfig {
                     command: Command::ChooseSelected,
                 },
                 Keymap {
+                    key_sequence: "L".into(),
+                    command: Command::QuickPlay,
+                },
+                Keymap {
                     key_sequence: "r".into(),
                     command: Command::RefreshPlayback,
                 },

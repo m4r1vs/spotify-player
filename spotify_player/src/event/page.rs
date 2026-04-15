@@ -170,7 +170,7 @@ fn handle_command_for_library_page(
     match focus_state {
         LibraryFocusState::Playlists => {
             let data = state.data.read();
-            Ok(window::handle_command_for_playlist_list_window(
+            window::handle_command_for_playlist_list_window(
                 command,
                 &ui.search_filtered_items(&data.user_data.folder_playlists_items(folder_id))
                     .into_iter()
@@ -178,7 +178,8 @@ fn handle_command_for_library_page(
                     .collect::<Vec<_>>(),
                 &data,
                 ui,
-            ))
+                client_pub,
+            )
         }
         LibraryFocusState::SavedAlbums => {
             // Use a read lock for the function call
@@ -193,22 +194,23 @@ fn handle_command_for_library_page(
         }
         LibraryFocusState::FollowedArtists => {
             let data = state.data.read();
-            Ok(window::handle_command_for_artist_list_window(
+            window::handle_command_for_artist_list_window(
                 command,
                 &ui.search_filtered_items(&data.user_data.followed_artists),
                 &data,
                 ui,
-            ))
+                client_pub,
+            )
         }
         LibraryFocusState::SavedShows => {
             let data = state.data.read();
-            Ok(window::handle_command_for_show_list_window(
+            window::handle_command_for_show_list_window(
                 command,
                 &ui.search_filtered_items(&data.user_data.saved_shows),
                 &data,
                 ui,
-            ))
-
+                client_pub,
+            )
         }
     }
 }
@@ -231,19 +233,24 @@ fn handle_key_sequence_for_search_page(
     // handle user's input
     if let SearchFocusState::Input = focus_state {
         if key_sequence.keys.len() == 1 {
-            return match &key_sequence.keys[0] {
+            match &key_sequence.keys[0] {
                 Key::None(crossterm::event::KeyCode::Enter) => {
                     if !line_input.is_empty() {
                         *current_query = line_input.get_text();
                         client_pub.send(ClientRequest::Search(line_input.get_text()))?;
                     }
-                    Ok(true)
+                    return Ok(true);
                 }
-                k => match line_input.input(k) {
-                    None => Ok(false),
-                    _ => Ok(true),
-                },
-            };
+                Key::Ctrl(crossterm::event::KeyCode::Enter) => {
+                    // fall through to handle Command::QuickPlay
+                }
+                k => {
+                    return match line_input.input(k) {
+                        None => Ok(false),
+                        _ => Ok(true),
+                    }
+                }
+            }
         }
     }
 
@@ -280,9 +287,11 @@ fn handle_key_sequence_for_search_page(
                 .unwrap_or_default();
 
             match found_keymap {
-                CommandOrAction::Command(command) => Ok(
-                    window::handle_command_for_artist_list_window(command, &artists, &data, ui),
-                ),
+                CommandOrAction::Command(command) => {
+                    window::handle_command_for_artist_list_window(
+                        command, &artists, &data, ui, client_pub,
+                    )
+                }
                 CommandOrAction::Action(action, ActionTarget::SelectedItem) => {
                     window::handle_action_for_selected_item(action, &artists, &data, ui, client_pub)
                 }
@@ -317,12 +326,13 @@ fn handle_key_sequence_for_search_page(
 
             match found_keymap {
                 CommandOrAction::Command(command) => {
-                    Ok(window::handle_command_for_playlist_list_window(
+                    window::handle_command_for_playlist_list_window(
                         command,
                         &playlist_refs,
                         &data,
                         ui,
-                    ))
+                        client_pub,
+                    )
                 }
                 CommandOrAction::Action(action, ActionTarget::SelectedItem) => {
                     window::handle_action_for_selected_item(
@@ -342,9 +352,9 @@ fn handle_key_sequence_for_search_page(
                 .unwrap_or_default();
 
             match found_keymap {
-                CommandOrAction::Command(command) => Ok(
-                    window::handle_command_for_show_list_window(command, &shows, &data, ui),
-                ),
+                CommandOrAction::Command(command) => {
+                    window::handle_command_for_show_list_window(command, &shows, &data, ui, client_pub)
+                }
                 CommandOrAction::Action(action, ActionTarget::SelectedItem) => {
                     window::handle_action_for_selected_item(action, &shows, &data, ui, client_pub)
                 }
@@ -572,6 +582,28 @@ fn handle_command_for_browse_page(
             },
             _ => anyhow::bail!("expect a browse page state"),
         },
+        Command::QuickPlay => match page_state {
+            PageState::Browse { state } => match state {
+                BrowsePageUIState::CategoryList { .. } => return Ok(false),
+                BrowsePageUIState::CategoryPlaylistList { category, .. } => {
+                    let playlists =
+                        data.browse
+                            .category_playlists
+                            .get(&category.id)
+                            .context(format!(
+                                "expect to have playlists data for {category} category"
+                            ))?;
+                    let context_id = ContextId::Playlist(
+                        ui.search_filtered_items(playlists)[selected].id.clone(),
+                    );
+                    client_pub.send(ClientRequest::Player(PlayerRequest::StartPlayback(
+                        Playback::Context(context_id, None),
+                        None,
+                    )))?;
+                }
+            },
+            _ => anyhow::bail!("expect a browse page state"),
+        },
         Command::Search => {
             ui.new_search_popup();
         }
@@ -636,17 +668,26 @@ fn handle_command_for_playlists_page(
     }
     let flat_playlists = ui.search_filtered_items(&flat_playlists);
 
-    if command == Command::ChooseSelected {
+    if command == Command::ChooseSelected || command == Command::QuickPlay {
         if let Some(p) = flat_playlists.get(selected_index) {
             let context_id = ContextId::Playlist(p.id.clone());
-            ui.new_page(PageState::Context {
-                id: None,
-                context_page_type: ContextPageType::Browsing(context_id.clone()),
-                state: None,
-            });
-            client_pub
-                .send(ClientRequest::GetContext(context_id))
-                .unwrap_or_default();
+            if command == Command::ChooseSelected {
+                ui.new_page(PageState::Context {
+                    id: None,
+                    context_page_type: ContextPageType::Browsing(context_id.clone()),
+                    state: None,
+                });
+                client_pub
+                    .send(ClientRequest::GetContext(context_id))
+                    .unwrap_or_default();
+            } else {
+                client_pub
+                    .send(ClientRequest::Player(PlayerRequest::StartPlayback(
+                        Playback::Context(context_id, None),
+                        None,
+                    )))
+                    .unwrap_or_default();
+            }
         }
         return true;
     }

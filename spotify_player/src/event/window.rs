@@ -170,12 +170,13 @@ pub fn handle_command_for_focused_context_window(
                         ui,
                         client_pub,
                     ),
-                    ArtistFocusState::RelatedArtists => Ok(handle_command_for_artist_list_window(
+                    ArtistFocusState::RelatedArtists => handle_command_for_artist_list_window(
                         command,
                         &ui.search_filtered_items(related_artists),
                         &data,
                         ui,
-                    )),
+                        client_pub,
+                    ),
                     ArtistFocusState::TopTracks => handle_command_for_track_table_window(
                         command, client_pub, None, top_tracks, &data, ui, state,
                     ),
@@ -305,7 +306,7 @@ fn handle_command_for_track_table_window(
     }
 
     match command {
-        Command::PlayRandom | Command::ChooseSelected => {
+        Command::PlayRandom | Command::ChooseSelected | Command::QuickPlay => {
             let uri = if command == Command::PlayRandom {
                 tracks[rand::rng().random_range(0..tracks.len())].id.uri()
             } else {
@@ -389,8 +390,8 @@ pub fn handle_command_for_track_list_window(
         return Ok(true);
     }
     match command {
-        Command::ChooseSelected => {
-            // for a track list, `ChooseSelected` on a track
+        Command::ChooseSelected | Command::QuickPlay => {
+            // for a track list, `ChooseSelected` and `QuickPlay` on a track
             // will start a `URIs` playback containing only that track.
             // This is different from the track table, which handles
             // `ChooseSelected` by starting a `URIs` playback
@@ -426,15 +427,16 @@ pub fn handle_command_for_artist_list_window(
     artists: &[&Artist],
     data: &DataReadGuard,
     ui: &mut UIStateGuard,
-) -> bool {
+    client_pub: &flume::Sender<ClientRequest>,
+) -> Result<bool> {
     let id = ui.current_page_mut().selected().unwrap_or_default();
     if id >= artists.len() {
-        return false;
+        return Ok(false);
     }
 
     let count = ui.count_prefix;
     if handle_navigation_command(command, ui.current_page_mut(), id, artists.len(), count) {
-        return true;
+        return Ok(true);
     }
     match command {
         Command::ChooseSelected => {
@@ -445,6 +447,13 @@ pub fn handle_command_for_artist_list_window(
                 state: None,
             });
         }
+        Command::QuickPlay => {
+            let context_id = ContextId::Artist(artists[id].id.clone());
+            client_pub.send(ClientRequest::Player(PlayerRequest::StartPlayback(
+                Playback::Context(context_id, None),
+                None,
+            )))?;
+        }
         Command::ShowActionsOnSelectedItem => {
             let actions = construct_artist_actions(artists[id], data);
             ui.popup = Some(PopupState::ActionList(
@@ -452,9 +461,9 @@ pub fn handle_command_for_artist_list_window(
                 ListState::default(),
             ));
         }
-        _ => return false,
+        _ => return Ok(false),
     }
-    true
+    Ok(true)
 }
 
 pub fn handle_command_for_album_list_window(
@@ -482,6 +491,13 @@ pub fn handle_command_for_album_list_window(
                 state: None,
             });
         }
+        Command::QuickPlay => {
+            let context_id = ContextId::Album(albums[id].id.clone());
+            client_pub.send(ClientRequest::Player(PlayerRequest::StartPlayback(
+                Playback::Context(context_id, None),
+                None,
+            )))?;
+        }
         Command::ShowActionsOnSelectedItem => {
             let actions = construct_album_actions(albums[id], data);
             ui.popup = Some(PopupState::ActionList(
@@ -502,15 +518,16 @@ pub fn handle_command_for_playlist_list_window(
     playlists: &[&PlaylistFolderItem],
     data: &DataReadGuard,
     ui: &mut UIStateGuard,
-) -> bool {
+    client_pub: &flume::Sender<ClientRequest>,
+) -> Result<bool> {
     let id = ui.current_page_mut().selected().unwrap_or_default();
     if id >= playlists.len() {
-        return false;
+        return Ok(false);
     }
 
     let count = ui.count_prefix;
     if handle_navigation_command(command, ui.current_page_mut(), id, playlists.len(), count) {
-        return true;
+        return Ok(true);
     }
     match command {
         Command::ChooseSelected => {
@@ -524,7 +541,7 @@ pub fn handle_command_for_playlist_list_window(
                             state.focus = LibraryFocusState::Playlists;
                             state.playlist_folder_id = f.target_id;
                         }
-                        _ => return false,
+                        _ => return Ok(false),
                     }
                 }
                 PlaylistFolderItem::Playlist(p) => {
@@ -537,6 +554,15 @@ pub fn handle_command_for_playlist_list_window(
                 }
             }
         }
+        Command::QuickPlay => {
+            if let PlaylistFolderItem::Playlist(p) = playlists[id] {
+                let context_id = ContextId::Playlist(p.id.clone());
+                client_pub.send(ClientRequest::Player(PlayerRequest::StartPlayback(
+                    Playback::Context(context_id, None),
+                    None,
+                )))?;
+            }
+        }
         Command::ShowActionsOnSelectedItem => {
             if let PlaylistFolderItem::Playlist(p) = playlists[id] {
                 let actions = construct_playlist_actions(p, data);
@@ -546,9 +572,9 @@ pub fn handle_command_for_playlist_list_window(
                 ));
             }
         }
-        _ => return false,
+        _ => return Ok(false),
     }
-    true
+    Ok(true)
 }
 
 pub fn handle_command_for_show_list_window(
@@ -556,15 +582,16 @@ pub fn handle_command_for_show_list_window(
     shows: &[&Show],
     data: &DataReadGuard,
     ui: &mut UIStateGuard,
-) -> bool {
+    client_pub: &flume::Sender<ClientRequest>,
+) -> Result<bool> {
     let id = ui.current_page_mut().selected().unwrap_or_default();
     if id >= shows.len() {
-        return false;
+        return Ok(false);
     }
 
     let count = ui.count_prefix;
     if handle_navigation_command(command, ui.current_page_mut(), id, shows.len(), count) {
-        return true;
+        return Ok(true);
     }
     match command {
         Command::ChooseSelected => {
@@ -575,6 +602,13 @@ pub fn handle_command_for_show_list_window(
                 state: None,
             });
         }
+        Command::QuickPlay => {
+            let context_id = ContextId::Show(shows[id].id.clone());
+            client_pub.send(ClientRequest::Player(PlayerRequest::StartPlayback(
+                Playback::Context(context_id, None),
+                None,
+            )))?;
+        }
         Command::ShowActionsOnSelectedItem => {
             let actions = construct_show_actions(shows[id], data);
             ui.popup = Some(PopupState::ActionList(
@@ -582,9 +616,9 @@ pub fn handle_command_for_show_list_window(
                 ListState::default(),
             ));
         }
-        _ => return false,
+        _ => return Ok(false),
     }
-    true
+    Ok(true)
 }
 
 pub fn handle_command_for_episode_list_window(
@@ -605,7 +639,7 @@ pub fn handle_command_for_episode_list_window(
         return Ok(true);
     }
     match command {
-        Command::ChooseSelected => {
+        Command::ChooseSelected | Command::QuickPlay => {
             // Episodes don't have a Tracks context, so clear it
             state.player.write().currently_playing_tracks_id = None;
 
@@ -650,7 +684,7 @@ fn handle_command_for_episode_table_window(
         return Ok(true);
     }
     match command {
-        Command::ChooseSelected => {
+        Command::ChooseSelected | Command::QuickPlay => {
             let uri = episodes[id].id.uri();
 
             // Show context doesn't have a Tracks context, so clear it

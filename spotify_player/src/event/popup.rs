@@ -478,7 +478,7 @@ fn handle_command_for_list_popup(
                 on_select_func(ui, current_id + 1);
             }
         }
-        Command::ChooseSelected => {
+        Command::ChooseSelected | Command::QuickPlay => {
             if current_id < n_items {
                 on_choose_func(ui, current_id)?;
             }
