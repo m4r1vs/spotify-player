@@ -123,6 +123,7 @@ pub struct AppConfig {
 
     pub default_device: String,
     pub default_page: String,
+    pub playlist_page_default: bool,
 
     pub device: DeviceConfig,
 
@@ -382,6 +383,7 @@ impl Default for AppConfig {
 
             default_device: "spotify-player".to_string(),
             default_page: "Library".to_string(),
+            playlist_page_default: false,
 
             device: DeviceConfig::default(),
 

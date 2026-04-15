@@ -54,13 +54,16 @@ impl State {
             ui.theme = theme;
         }
 
-        ui.history = vec![match configs.app_config.default_page.as_str() {
-            "Playlists" => crate::state::ui::PageState::Playlists {
+        ui.history = vec![if configs.app_config.playlist_page_default
+            || configs.app_config.default_page == "Playlists"
+        {
+            crate::state::ui::PageState::Playlists {
                 state: crate::state::ui::PlaylistsPageUIState::new(),
-            },
-            _ => crate::state::ui::PageState::Library {
+            }
+        } else {
+            crate::state::ui::PageState::Library {
                 state: crate::state::ui::LibraryPageUIState::new(),
-            },
+            }
         }];
 
         let app_data = AppData::new(&configs.cache_folder);
