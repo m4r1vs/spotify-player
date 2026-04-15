@@ -668,6 +668,17 @@ fn handle_command_for_playlists_page(
     }
     let flat_playlists = ui.search_filtered_items(&flat_playlists);
 
+    if command == Command::ShowActionsOnSelectedItem {
+        if let Some(p) = flat_playlists.get(selected_index) {
+            let actions = construct_playlist_actions(p, &data);
+            ui.popup = Some(PopupState::ActionList(
+                Box::new(ActionListItem::Playlist((**p).clone(), actions)),
+                ListState::default(),
+            ));
+        }
+        return true;
+    }
+
     if command == Command::ChooseSelected || command == Command::QuickPlay {
         if let Some(p) = flat_playlists.get(selected_index) {
             let context_id = ContextId::Playlist(p.id.clone());
