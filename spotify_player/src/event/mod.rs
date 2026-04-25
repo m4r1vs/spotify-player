@@ -14,7 +14,7 @@ use crate::{
         PlaylistFolderItem, PlaylistId, PlaylistPopupAction, PlaylistsPageUIState, PopupState,
         SearchFocusState, SearchPageUIState, SharedState, ShowId, Track, TrackId, TrackOrder,
         TracksId, UIStateGuard, USER_LIKED_TRACKS_ID, USER_RECENTLY_PLAYED_TRACKS_ID,
-        USER_TOP_TRACKS_ID
+        USER_TOP_TRACKS_ID,
     },
     ui::{single_line_input::LineInput, Orientation},
     utils::parse_uri,
@@ -335,6 +335,14 @@ pub fn handle_action_in_context(
             }
             Action::AddToQueue => {
                 client_pub.send(ClientRequest::AddAlbumToQueue(album.id))?;
+                ui.popup = None;
+                Ok(true)
+            }
+            Action::CreatePlaylist => {
+                client_pub.send(ClientRequest::CreatePlaylistFromAlbum {
+                    album_id: album.id,
+                    album_name: album.name,
+                })?;
                 ui.popup = None;
                 Ok(true)
             }

@@ -18,14 +18,26 @@
         defaultPackage = pkgs.callPackage ./default.nix {};
         devShell = with pkgs;
           mkShell {
-            buildInputs = [
-              rustup
+            nativeBuildInputs = [
               pkg-config
-
+              cmake
+              autoconf
+              automake
+              libtool
+              rust-analyzer
+              rustPlatform.bindgenHook
+              cargo
+              rustc
+            ];
+            buildInputs = [
               # spotify-player dependencies
+              alsa-lib
+              dbus
+              fontconfig
               dbus-glib
               libsixel
               openssl
+              libpulseaudio
             ];
           };
       }

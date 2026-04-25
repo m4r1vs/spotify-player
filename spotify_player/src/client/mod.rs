@@ -8,7 +8,7 @@ use crate::{
     auth::AuthConfig,
     state::{
         store_data_into_file_cache, Album, AlbumId, Artist, ArtistId, Category, Context, ContextId,
-        Device, FileCacheKey, Item, ItemId, MemoryCaches, Playback, PlaybackMetadata, Playlist,
+        Device, FileCacheKey, Item, ItemId, MemoryCaches, PlayableId, Playback, PlaybackMetadata, Playlist,
         PlaylistFolderItem, PlaylistId, SearchResults, SharedState, Show, ShowId, Track, TrackId,
         UserId, TTL_CACHE_DURATION, USER_LIKED_TRACKS_URI, USER_RECENTLY_PLAYED_TRACKS_URI,
         USER_TOP_TRACKS_URI,
@@ -645,6 +645,13 @@ impl AppClient {
                     desc.as_str(),
                 )
                 .await?;
+            }
+            ClientRequest::CreatePlaylistFromAlbum {
+                album_id,
+                album_name,
+            } => {
+                self.create_playlist_from_album(&state, album_id, &album_name)
+                    .await?;
             }
             #[cfg(feature = "image")]
             ClientRequest::LoadImage(url) => {
@@ -1850,6 +1857,66 @@ impl AppClient {
             .user_data
             .playlists
             .insert(0, PlaylistFolderItem::Playlist(playlist));
+        Ok(())
+    }
+
+    /// Create a new playlist from an album
+    async fn create_playlist_from_album(
+        &self,
+        state: &SharedState,
+        album_id: AlbumId<'static>,
+        album_name: &str,
+    ) -> Result<()> {
+        let context = self.album_context(album_id).await?;
+        let tracks = match context {
+            Context::Album { tracks, .. } => tracks,
+            _ => return Err(anyhow::anyhow!("Expected album context")),
+        };
+
+        let user_id = state
+            .data
+            .read()
+            .user_data
+            .user
+            .as_ref()
+            .map(|u| u.id.clone())
+            .context("Failed to get current user ID")?;
+
+        let playlist: Playlist = self
+            .user_playlist_create(
+                user_id,
+                album_name,
+                Some(false),
+                Some(false),
+                Some(&format!("All songs of album {album_name}")),
+            )
+            .await?
+            .into();
+
+        let track_ids = tracks
+            .iter()
+            .map(|t| PlayableId::Track(t.id.as_ref()))
+            .collect::<Vec<_>>();
+
+        for chunk in track_ids.chunks(100) {
+            self.playlist_add_items(playlist.id.as_ref(), chunk.iter().cloned(), None)
+                .await?;
+        }
+
+        tracing::info!(
+            "new playlist (name={},id={}) from album {} was successfully created",
+            playlist.name,
+            playlist.id,
+            album_name
+        );
+
+        state
+            .data
+            .write()
+            .user_data
+            .playlists
+            .insert(0, PlaylistFolderItem::Playlist(playlist));
+
         Ok(())
     }
 

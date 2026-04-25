@@ -59,6 +59,10 @@ pub enum ClientRequest {
         collab: bool,
         desc: String,
     },
+    CreatePlaylistFromAlbum {
+        album_id: AlbumId<'static>,
+        album_name: String,
+    },
     #[cfg(feature = "image")]
     LoadImage(String),
 }

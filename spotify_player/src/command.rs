@@ -114,6 +114,7 @@ pub enum Action {
     CopyLink,
     Follow,
     Unfollow,
+    CreatePlaylist,
 }
 
 #[derive(Debug)]
@@ -231,6 +232,7 @@ pub fn construct_album_actions(album: &Album, data: &DataReadGuard) -> Vec<Actio
         Action::ShowActionsOnArtist,
         Action::CopyLink,
         Action::AddToQueue,
+        Action::CreatePlaylist,
     ];
     if data.user_data.saved_albums.iter().any(|a| a.id == album.id) {
         actions.push(Action::DeleteFromLibrary);
