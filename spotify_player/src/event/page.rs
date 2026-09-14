@@ -1,4 +1,3 @@
-use anyhow::Context as _;
 use command::CommandOrAction;
 
 use crate::command::{construct_album_actions, construct_playlist_actions, construct_show_actions};
@@ -130,12 +129,12 @@ fn handle_command_for_library_page(
         // Sort albums alphabetically
         data.user_data
             .saved_albums
-            .sort_by(|x, y| x.name.to_lowercase().cmp(&y.name.to_lowercase()));
+            .sort_by_key(|x| x.name.to_lowercase());
 
         // Sort artists alphabetically
         data.user_data
             .followed_artists
-            .sort_by(|x, y| x.name.to_lowercase().cmp(&y.name.to_lowercase()));
+            .sort_by_key(|x| x.name.to_lowercase());
     }
 
     if command == Command::SortLibraryByRecent {
@@ -164,7 +163,7 @@ fn handle_command_for_library_page(
         // Sort albums by recent addition
         data.user_data
             .saved_albums
-            .sort_by(|a, b| b.added_at.cmp(&a.added_at));
+            .sort_by_key(|a| std::cmp::Reverse(a.added_at));
     }
 
     match focus_state {
@@ -236,8 +235,27 @@ fn handle_key_sequence_for_search_page(
             match &key_sequence.keys[0] {
                 Key::None(crossterm::event::KeyCode::Enter) => {
                     if !line_input.is_empty() {
-                        *current_query = line_input.get_text();
-                        client_pub.send(ClientRequest::Search(line_input.get_text()))?;
+                        let query = line_input.get_text();
+                        current_query.clone_from(&query);
+
+                        if state.data.write().caches.begin_search(&query) {
+                            if let Err(err) = client_pub.send(ClientRequest::Search(query.clone()))
+                            {
+                                state.data.write().caches.fail_search(query);
+                                return Err(err.into());
+                            }
+                        }
+                    }
+                    return Ok(true);
+                }
+                Key::None(crossterm::event::KeyCode::Backspace) => {
+                    if line_input.is_empty() {
+                        if ui.history.len() > 1 {
+                            ui.history.pop();
+                            ui.popup = None;
+                        }
+                    } else {
+                        line_input.input(&Key::None(crossterm::event::KeyCode::Backspace));
                     }
                     return Ok(true);
                 }
@@ -262,7 +280,7 @@ fn handle_key_sequence_for_search_page(
     };
 
     let data = state.data.read();
-    let search_results = data.caches.search.get(current_query);
+    let search_results = data.caches.search_results(current_query);
 
     match focus_state {
         SearchFocusState::Input => anyhow::bail!("user's search input should be handled before"),
@@ -462,6 +480,7 @@ fn handle_action_for_browse_page(
                 let Some(playlists) = data.browse.category_playlists.get(&category.id) else {
                     return Ok(false);
                 };
+                let playlists = ui.search_filtered_items(playlists);
 
                 let page_state = ui.current_page_mut();
                 let selected = page_state.selected().unwrap_or_default();
@@ -524,9 +543,12 @@ fn handle_command_for_browse_page(
 
     let len = match ui.current_page() {
         PageState::Browse { state } => match state {
-            BrowsePageUIState::CategoryList { .. } => {
-                ui.search_filtered_items(&data.browse.categories).len()
-            }
+            BrowsePageUIState::CategoryList { .. } => data
+                .browse
+                .categories
+                .as_deref()
+                .map(|categories| ui.search_filtered_items(categories).len())
+                .unwrap_or_default(),
             BrowsePageUIState::CategoryPlaylistList { category, .. } => data
                 .browse
                 .category_playlists
@@ -551,7 +573,10 @@ fn handle_command_for_browse_page(
         Command::ChooseSelected => match page_state {
             PageState::Browse { state } => match state {
                 BrowsePageUIState::CategoryList { .. } => {
-                    let categories = ui.search_filtered_items(&data.browse.categories);
+                    let Some(categories) = data.browse.categories.as_deref() else {
+                        return Ok(false);
+                    };
+                    let categories = ui.search_filtered_items(categories);
                     client_pub.send(ClientRequest::GetBrowseCategoryPlaylists(
                         categories[selected].clone(),
                     ))?;

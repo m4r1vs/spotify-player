@@ -5,6 +5,11 @@ use crate::{
     utils::filtered_items_from_query,
 };
 
+#[cfg(feature = "image")]
+use crate::ui::cover_image::CoverImage;
+#[cfg(feature = "image")]
+use ratatui_image::picker::Picker;
+
 pub type UIStateGuard<'a> = parking_lot::MutexGuard<'a, UIState>;
 
 mod page;
@@ -13,25 +18,51 @@ mod popup;
 pub use page::*;
 pub use popup::*;
 
-#[derive(Default, Debug)]
 #[cfg(feature = "image")]
+#[derive(Default)]
 pub struct ImageRenderInfo {
     pub url: String,
     pub render_area: ratatui::layout::Rect,
-    /// indicates if the image is rendered
-    pub rendered: bool,
+    pub state: Option<CoverImage>,
 }
 
-#[derive(Default, Debug)]
+#[cfg(feature = "image")]
+impl std::fmt::Debug for ImageRenderInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ImageRenderInfo")
+            .field("url", &self.url)
+            .field("render_area", &self.render_area)
+            .field("state", &self.state.is_some())
+            .finish()
+    }
+}
+
+#[derive(Default)]
 #[cfg(feature = "image")]
 pub struct PlaylistsPageRenderInfo {
-    pub render_areas: Vec<ratatui::layout::Rect>,
+    /// Cover images prepared for the currently rendered grid, keyed by image URL.
+    pub covers: std::collections::HashMap<String, (ratatui::layout::Rect, CoverImage)>,
     pub rendered: bool,
     pub start_row: usize,
     pub items_per_row: usize,
     pub max_visible_rows: usize,
     pub rect: ratatui::layout::Rect,
     pub search_query: String,
+}
+
+#[cfg(feature = "image")]
+impl std::fmt::Debug for PlaylistsPageRenderInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PlaylistsPageRenderInfo")
+            .field("covers", &self.covers.len())
+            .field("rendered", &self.rendered)
+            .field("start_row", &self.start_row)
+            .field("items_per_row", &self.items_per_row)
+            .field("max_visible_rows", &self.max_visible_rows)
+            .field("rect", &self.rect)
+            .field("search_query", &self.search_query)
+            .finish()
+    }
 }
 
 /// Application's UI state
@@ -56,6 +87,9 @@ pub struct UIState {
     pub last_cover_image_render_info: ImageRenderInfo,
     #[cfg(feature = "image")]
     pub last_playlists_page_render_info: PlaylistsPageRenderInfo,
+
+    #[cfg(feature = "image")]
+    pub picker: Picker,
 }
 
 impl UIState {
@@ -75,8 +109,13 @@ impl UIState {
     }
 
     pub fn new_page(&mut self, page: PageState) {
-        self.history.push(page);
         self.popup = None;
+        if let Some(current_page) = self.history.last() {
+            if &page == current_page {
+                return;
+            }
+        }
+        self.history.push(page);
     }
 
     /// Return whether there exists a focused popup.
@@ -127,6 +166,10 @@ impl Default for UIState {
             last_cover_image_render_info: ImageRenderInfo::default(),
             #[cfg(feature = "image")]
             last_playlists_page_render_info: PlaylistsPageRenderInfo::default(),
+
+            // Will be reinitialize later in ui/mod.rs after init_ui()
+            #[cfg(feature = "image")]
+            picker: Picker::halfblocks(),
         }
     }
 }

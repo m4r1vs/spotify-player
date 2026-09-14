@@ -6,6 +6,7 @@ const DEFAULT_CACHE_FOLDER: &str = ".cache/spotify-player";
 const APP_CONFIG_FILE: &str = "app.toml";
 const THEME_CONFIG_FILE: &str = "theme.toml";
 const KEYMAP_CONFIG_FILE: &str = "keymap.toml";
+pub(crate) const DEFAULT_NCSPOT_ONLY_GET_ENDPOINTS: &[&str] = &["me/playlists", "playlists/"];
 
 use anyhow::{anyhow, Result};
 use config_parser2::{config_parser_impl, ConfigParse, ConfigParser};
@@ -51,8 +52,9 @@ impl Configs {
 /// Application configurations
 pub struct AppConfig {
     pub theme: String,
-    pub client_id: Option<String>,
+    pub client_id: String,
     pub client_id_command: Option<Command>,
+    pub ncspot_only_get_endpoints: Vec<String>,
 
     pub client_port: u16,
 
@@ -73,6 +75,7 @@ pub struct AppConfig {
     pub notify_transient: bool,
 
     pub tracks_playback_limit: usize,
+    pub top_tracks_limit: usize,
 
     // session configs
     pub proxy: Option<String>,
@@ -81,6 +84,9 @@ pub struct AppConfig {
     // duration configs
     pub app_refresh_duration_in_ms: u64,
     pub playback_refresh_duration_in_ms: u64,
+
+    // Spotify Web API rate-limit retries
+    pub api_rate_limit_retries: usize,
 
     pub page_size_in_rows: usize,
 
@@ -103,8 +109,6 @@ pub struct AppConfig {
     pub cover_img_length: usize,
     #[cfg(feature = "image")]
     pub cover_img_width: usize,
-    #[cfg(feature = "image")]
-    pub cover_img_scale: f32,
     #[cfg(feature = "pixelate")]
     pub cover_img_pixels: u32,
 
@@ -121,7 +125,6 @@ pub struct AppConfig {
 
     pub enable_cover_image_cache: bool,
 
-    pub default_device: String,
     pub default_page: String,
     pub playlist_page_default: bool,
 
@@ -143,6 +146,15 @@ pub struct AppConfig {
     pub custom_queue: bool,
 
     pub title: Option<String>,
+
+    pub enable_relative_line_number: bool,
+
+    /// Start the application with playback paused instead of resuming the
+    /// previous session. Requires streaming. When the integrated client
+    /// connects on startup, Spotify may restore and auto-resume the last
+    /// playing track; enabling this pauses that auto-started playback once.
+    #[cfg(feature = "streaming")]
+    pub pause_on_startup: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -298,8 +310,12 @@ impl Default for AppConfig {
             //
             // [extended quota mode]: https://developer.spotify.com/documentation/web-api/concepts/quota-modes
             // [spotify API changes]: https://developer.spotify.com/blog/2024-11-27-changes-to-the-web-api
-            client_id: Some(NCSPOT_CLIENT_ID.to_string()),
+            client_id: NCSPOT_CLIENT_ID.to_string(),
             client_id_command: None,
+            ncspot_only_get_endpoints: DEFAULT_NCSPOT_ONLY_GET_ENDPOINTS
+                .iter()
+                .map(ToString::to_string)
+                .collect(),
 
             client_port: 8080,
 
@@ -308,6 +324,7 @@ impl Default for AppConfig {
             log_folder: None,
 
             tracks_playback_limit: 50,
+            top_tracks_limit: 100,
 
             playback_format: String::from(
                 "{status} {track} • {artists} {liked}\n{album} • {genres}\n{metadata}",
@@ -335,6 +352,7 @@ impl Default for AppConfig {
             ap_port: None,
             app_refresh_duration_in_ms: 32,
             playback_refresh_duration_in_ms: 0,
+            api_rate_limit_retries: 2,
 
             page_size_in_rows: 20,
 
@@ -351,12 +369,11 @@ impl Default for AppConfig {
 
             genre_num: 2,
 
+            // `0` means "auto": derive the cover's column count from the terminal's cell aspect ratio
             #[cfg(feature = "image")]
-            cover_img_length: 9,
+            cover_img_length: 0,
             #[cfg(feature = "image")]
             cover_img_width: 5,
-            #[cfg(feature = "image")]
-            cover_img_scale: 1.0,
             #[cfg(feature = "pixelate")]
             cover_img_pixels: 16,
 
@@ -381,7 +398,6 @@ impl Default for AppConfig {
 
             enable_cover_image_cache: true,
 
-            default_device: "spotify-player".to_string(),
             default_page: "Library".to_string(),
             playlist_page_default: false,
 
@@ -395,11 +411,16 @@ impl Default for AppConfig {
             sort_artist_albums_by_type: false,
 
             volume_scroll_step: 5,
-            enable_mouse_scroll_volume: true,
+            enable_mouse_scroll_volume: false,
 
             custom_queue: true,
 
             title: None,
+
+            enable_relative_line_number: false,
+
+            #[cfg(feature = "streaming")]
+            pause_on_startup: false,
         }
     }
 }
@@ -493,10 +514,10 @@ impl AppConfig {
         }
     }
 
-    /// Returns stdout of `client_id_command` if set, otherwise it returns the the value of `client_id`
-    pub fn get_user_client_id(&self) -> Result<Option<String>> {
+    /// Returns stdout of `client_id_command` if set, otherwise the value of `client_id`.
+    pub fn get_client_id(&self) -> Result<String> {
         match self.client_id_command {
-            Some(ref cmd) => cmd.execute(None).map(|out| Some(out.trim().to_string())),
+            Some(ref cmd) => cmd.execute(None).map(|out| out.trim().to_string()),
             None => Ok(self.client_id.clone()),
         }
     }

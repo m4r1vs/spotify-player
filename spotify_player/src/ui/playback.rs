@@ -12,8 +12,6 @@ use crate::{
     state::Track,
     ui::utils::{format_genres, to_bidi_string},
 };
-#[cfg(feature = "image")]
-use anyhow::{Context, Result};
 use rspotify::model::Id;
 
 pub fn play_animation(anim: Vec<String>) -> String {
@@ -76,11 +74,11 @@ pub fn render_playback_window(
                         match configs.app_config.progress_bar_position {
                             config::ProgressBarPosition::Bottom => {
                                 let ver_chunks = split_rect_for_progress_bar(rect); // rect, progress_bar_rect
-                                let hor_chunks = split_rect_for_cover_img(ver_chunks.0); // cover_img_rect, metadata_rect
+                                let hor_chunks = split_rect_for_cover_img(ver_chunks.0, &ui.picker); // cover_img_rect, metadata_rect
                                 (hor_chunks.1, hor_chunks.0, ver_chunks.1)
                             }
                             config::ProgressBarPosition::Right => {
-                                let hor_chunks = split_rect_for_cover_img(rect); // cover_img_rect, rect
+                                let hor_chunks = split_rect_for_cover_img(rect, &ui.picker); // cover_img_rect, rect
                                 let ver_chunks = split_rect_for_progress_bar(hor_chunks.1); // metadata_rect, progress_bar_rect
                                 (ver_chunks.0, hor_chunks.0, ver_chunks.1)
                             }
@@ -96,49 +94,31 @@ pub fn render_playback_window(
                         rspotify::model::PlayableItem::Unknown(_) => None,
                     };
                     if let Some(url) = url {
-                        let needs_clear = if ui.last_cover_image_render_info.url != url
-                            || ui.last_cover_image_render_info.render_area != cover_img_rect
-                        {
-                            ui.last_cover_image_render_info = ImageRenderInfo {
-                                url,
-                                render_area: cover_img_rect,
-                                rendered: false,
-                            };
-                            true
-                        } else {
-                            false
-                        };
-
-                        if needs_clear {
-                            // clear the image's both new and old areas to ensure no remaining artifacts before rendering the image
-                            // See: https://github.com/aome510/spotify-player/issues/389
-                            super::utils::clear_area(
-                                frame,
-                                ui.last_cover_image_render_info.render_area,
-                                &ui.theme,
-                            );
-                            super::utils::clear_area(frame, cover_img_rect, &ui.theme);
-                        } else {
-                            if !ui.last_cover_image_render_info.rendered {
-                                if let Err(err) = render_playback_cover_image(state, ui) {
-                                    tracing::error!(
-                                        "Failed to render playback's cover image: {err:#}"
-                                    );
-                                }
+                        let data = state.data.read();
+                        if let Some(img) = data.caches.images.get(&url) {
+                            if ui.last_cover_image_render_info.url != url
+                                || ui.last_cover_image_render_info.render_area != cover_img_rect
+                            {
+                                let state = match crate::ui::cover_image::CoverImage::new(
+                                    &ui.picker,
+                                    img,
+                                    cover_img_rect,
+                                ) {
+                                    Ok(cover) => Some(cover),
+                                    Err(err) => {
+                                        tracing::error!("Failed to encode cover image: {err:#}");
+                                        None
+                                    }
+                                };
+                                ui.last_cover_image_render_info = ImageRenderInfo {
+                                    url,
+                                    render_area: cover_img_rect,
+                                    state,
+                                };
                             }
-
-                            // set the `skip` state of cells in the cover image area
-                            // to prevent buffer from overwriting the image's rendered area
-                            // NOTE: `skip` should not be set when clearing the render area.
-                            // Otherwise, nothing will be clear as the buffer doesn't handle cells with `skip=true`.
-                            for x in cover_img_rect.left()..cover_img_rect.right() {
-                                for y in cover_img_rect.top()..cover_img_rect.bottom() {
-                                    frame
-                                        .buffer_mut()
-                                        .cell_mut((x, y))
-                                        .expect("invalid cell")
-                                        .set_skip(true);
-                                }
+                            let area = ui.last_cover_image_render_info.render_area;
+                            if let Some(cover) = ui.last_cover_image_render_info.state.as_mut() {
+                                cover.render(frame, area);
                             }
                         }
                     }
@@ -174,7 +154,7 @@ pub fn render_playback_window(
             render_playback_progress_bar(frame, ui, progress, duration, progress_bar_rect);
             #[cfg(feature = "streaming")]
             if let Some(vis_r) = vis_rect {
-                super::streaming::render_audio_visualization(frame, state, vis_r);
+                super::streaming::render_audio_visualization(frame, state, &ui.theme, vis_r);
             }
             return other_rect;
         }
@@ -184,14 +164,7 @@ pub fn render_playback_window(
     // clear the previous widget's area before rendering the text.
     #[cfg(feature = "image")]
     {
-        if ui.last_cover_image_render_info.rendered {
-            super::utils::clear_area(
-                frame,
-                ui.last_cover_image_render_info.render_area,
-                &ui.theme,
-            );
-            ui.last_cover_image_render_info = ImageRenderInfo::default();
-        }
+        ui.last_cover_image_render_info = ImageRenderInfo::default();
     }
 
     if player.playback_last_updated_time.is_none() {
@@ -235,10 +208,10 @@ fn split_rect_for_progress_bar(rect: Rect) -> (Rect, Rect) {
 }
 
 #[cfg(feature = "image")]
-fn split_rect_for_cover_img(rect: Rect) -> (Rect, Rect) {
+fn split_rect_for_cover_img(rect: Rect, picker: &ratatui_image::picker::Picker) -> (Rect, Rect) {
     let configs = config::get_config();
     let hor_chunks = Layout::horizontal([
-        Constraint::Length(configs.app_config.cover_img_length as u16),
+        Constraint::Length(cover_img_length(configs, picker)),
         Constraint::Fill(0), // metadata_rect
     ])
     .spacing(1)
@@ -249,6 +222,20 @@ fn split_rect_for_cover_img(rect: Rect) -> (Rect, Rect) {
     .split(hor_chunks[0]);
 
     (ver_chunks[0], hor_chunks[1])
+}
+
+/// Determine the cover image box's width in columns.
+#[cfg(feature = "image")]
+fn cover_img_length(configs: &config::Configs, picker: &ratatui_image::picker::Picker) -> u16 {
+    match configs.app_config.cover_img_length {
+        // When `cover_img_length` is `0` (the default), derive it from the terminal's cell aspect ratio
+        0 => {
+            let font_size = picker.font_size();
+            let rows = configs.app_config.cover_img_width as u16;
+            rows * font_size.height / font_size.width
+        }
+        length => length as u16,
+    }
 }
 
 fn construct_playback_text(
@@ -352,6 +339,7 @@ fn construct_playback_text(
                     to_bidi_string(&crate::utils::map_join(&track.artists, |a| &a.name, ", ")),
                     ui.theme.playback_artists(),
                 ),
+                #[allow(deprecated)]
                 rspotify::model::PlayableItem::Episode(episode) => {
                     (episode.show.publisher.clone(), ui.theme.playback_artists())
                 }
@@ -470,41 +458,6 @@ fn render_playback_progress_bar(
 
     // update the progress bar's position stored inside the UI state
     ui.playback_progress_bar_rect = rect;
-}
-
-#[cfg(feature = "image")]
-fn render_playback_cover_image(state: &SharedState, ui: &mut UIStateGuard) -> Result<()> {
-    let data = state.data.read();
-    if let Some(image) = data.caches.images.get(&ui.last_cover_image_render_info.url) {
-        let rect = ui.last_cover_image_render_info.render_area;
-
-        // `viuer` renders image using `sixel` in a different scale compared to other methods.
-        // Scale the image to make the rendered image more fit if needed.
-        // This scaling factor is user configurable as the scale works differently
-        // with different fonts and terminals.
-        // For more context, see https://github.com/aome510/spotify-player/issues/122.
-        let scale = config::get_config().app_config.cover_img_scale;
-        let width = (f32::from(rect.width) * scale).round() as u32;
-        let height = (f32::from(rect.height) * scale).round() as u32;
-
-        viuer::print(
-            image,
-            &viuer::Config {
-                x: rect.x,
-                y: rect.y as i16,
-                width: Some(width),
-                height: Some(height),
-                restore_cursor: true,
-                transparent: true,
-                ..Default::default()
-            },
-        )
-        .context("print image to the terminal")?;
-
-        ui.last_cover_image_render_info.rendered = true;
-    }
-
-    Ok(())
 }
 
 /// Split the given area into two, the first one for the playback window

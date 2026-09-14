@@ -54,7 +54,11 @@ pub fn clear_area(frame: &mut Frame, rect: Rect, theme: &config::Theme) {
     for x in rect.left()..rect.right() {
         for y in rect.top()..rect.bottom() {
             if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
-                cell.set_char(' ').set_style(theme.app()).set_skip(false);
+                cell.set_char(' ')
+                    .set_style(theme.app())
+                    // the area may have been painted by an image protocol, so force ratatui to
+                    // rewrite it instead of diffing against its own (already blank) buffer
+                    .set_diff_option(ratatui::buffer::CellDiffOption::AlwaysUpdate);
             }
         }
     }
@@ -78,15 +82,29 @@ pub fn construct_list_widget<'a>(
     theme: &config::Theme,
     items: Vec<(String, bool)>,
     is_active: bool,
+    selected_index: Option<usize>,
 ) -> (List<'a>, usize) {
+    let configs = config::get_config();
     let n_items = items.len();
 
     (
         List::new(
             items
                 .into_iter()
-                .map(|(s, is_active)| {
-                    ListItem::new(s).style(if is_active {
+                .enumerate()
+                .map(|(i, (s, is_playing))| {
+                    let text = if is_active && configs.app_config.enable_relative_line_number {
+                        if let Some(selected_index) = selected_index {
+                            let diff = (i as isize - selected_index as isize).abs();
+                            let width = std::cmp::min(n_items.to_string().len(), 2);
+                            format!("{diff:>width$}  {s}")
+                        } else {
+                            s
+                        }
+                    } else {
+                        s
+                    };
+                    ListItem::new(text).style(if is_playing {
                         theme.current_playing()
                     } else {
                         Style::default()

@@ -186,6 +186,12 @@ pub fn handle_cli_subcommand(cmd: &str, args: &ArgMatches) -> Result<()> {
     // handle commands that don't require a client separately
     match cmd {
         "authenticate" => {
+            // Force re-authentication of every Web API identity, followed by librespot.
+            let mut api_client = client::new_api_client()?;
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(crate::auth::prompt_for_user_token(&mut api_client, true))
+                .context("authenticate Spotify Web API client")?;
+
             let auth_config = AuthConfig::new(configs)?;
             crate::auth::get_creds(&auth_config, true, false)?;
             std::process::exit(0);
@@ -377,7 +383,7 @@ fn print_features() {
     print_feature!("streaming");
     print_feature!("media-control");
     print_feature!("image");
-    print_feature!("viuer");
+    print_feature!("ratatui-image");
     print_feature!("sixel");
     print_feature!("pixelate");
     print_feature!("notify");

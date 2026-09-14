@@ -6,7 +6,10 @@ use std::{
 use chrono_humanize::HumanTime;
 use ratatui::text::Line;
 
-use crate::{state::Episode, utils::format_duration};
+use crate::{
+    state::{Episode, SearchCacheEntry},
+    utils::format_duration,
+};
 
 use super::{
     config, playback::play_animation, utils, utils::construct_and_render_block, Album, Alignment, Artist, ArtistFocusState,
@@ -50,24 +53,59 @@ pub fn render_search_page(
     // 1. Get data
     let data = state.data.read();
 
-    let (focus_state, current_query, line_input) = match ui.current_page() {
+    let (focus_state, current_query) = match ui.current_page() {
         PageState::Search {
             state,
             current_query,
-            line_input,
-        } => (state.focus, current_query, line_input),
+            ..
+        } => (state.focus, current_query),
         _ => return,
     };
 
-    let search_results = data.caches.search.get(current_query);
+    let search_entry = data.caches.search.get(current_query);
+    let search_results = data.caches.search_results(current_query);
 
     // 2. Construct the page's layout
     let rect = construct_and_render_block("Search", &ui.theme, Borders::ALL, frame, rect);
 
+    let status = match search_entry {
+        Some(SearchCacheEntry::Loading) => Some("Loading..."),
+        Some(SearchCacheEntry::Failed) => Some("Search failed"),
+        _ => None,
+    };
+
     // search input's layout
-    let chunks = Layout::vertical([Constraint::Length(1), Constraint::Fill(0)]).split(rect);
-    let search_input_rect = chunks[0];
+    let input_height = if status.is_some() { 2 } else { 1 };
+    let chunks =
+        Layout::vertical([Constraint::Length(input_height), Constraint::Fill(0)]).split(rect);
+    let search_input_rect = if status.is_some() {
+        construct_and_render_block("", &ui.theme, Borders::BOTTOM, frame, chunks[0])
+    } else {
+        chunks[0]
+    };
     let rect = chunks[1];
+
+    let PageState::Search { line_input, .. } = ui.current_page_mut() else {
+        return;
+    };
+    frame.render_widget(
+        line_input.widget(is_active && focus_state == SearchFocusState::Input),
+        search_input_rect,
+    );
+
+    if let Some(status) = status {
+        let status_rect = Layout::vertical([
+            Constraint::Fill(1),
+            Constraint::Length(1),
+            Constraint::Fill(1),
+        ])
+        .split(rect)[1];
+        frame.render_widget(
+            Paragraph::new(status).alignment(Alignment::Center),
+            status_rect,
+        );
+        return;
+    }
 
     // track/album/artist/playlist/show/episode search results layout
     let chunks = match ui.orientation {
@@ -142,8 +180,13 @@ pub fn render_search_page(
             .unwrap_or_default();
 
         let is_active = is_active && focus_state == SearchFocusState::Tracks;
+        let selected_index = if is_active {
+            ui.current_page_mut().selected()
+        } else {
+            None
+        };
 
-        utils::construct_list_widget(&ui.theme, track_items, is_active)
+        utils::construct_list_widget(&ui.theme, track_items, is_active, selected_index)
     };
 
     let (album_list, n_albums) = {
@@ -152,8 +195,13 @@ pub fn render_search_page(
             .unwrap_or_default();
 
         let is_active = is_active && focus_state == SearchFocusState::Albums;
+        let selected_index = if is_active {
+            ui.current_page_mut().selected()
+        } else {
+            None
+        };
 
-        utils::construct_list_widget(&ui.theme, album_items, is_active)
+        utils::construct_list_widget(&ui.theme, album_items, is_active, selected_index)
     };
 
     let (artist_list, n_artists) = {
@@ -162,8 +210,13 @@ pub fn render_search_page(
             .unwrap_or_default();
 
         let is_active = is_active && focus_state == SearchFocusState::Artists;
+        let selected_index = if is_active {
+            ui.current_page_mut().selected()
+        } else {
+            None
+        };
 
-        utils::construct_list_widget(&ui.theme, artist_items, is_active)
+        utils::construct_list_widget(&ui.theme, artist_items, is_active, selected_index)
     };
 
     let (playlist_list, n_playlists) = {
@@ -172,8 +225,13 @@ pub fn render_search_page(
             .unwrap_or_default();
 
         let is_active = is_active && focus_state == SearchFocusState::Playlists;
+        let selected_index = if is_active {
+            ui.current_page_mut().selected()
+        } else {
+            None
+        };
 
-        utils::construct_list_widget(&ui.theme, playlist_items, is_active)
+        utils::construct_list_widget(&ui.theme, playlist_items, is_active, selected_index)
     };
 
     let (show_list, n_shows) = {
@@ -181,8 +239,13 @@ pub fn render_search_page(
             .map(|s| search_items(&s.shows))
             .unwrap_or_default();
         let is_active = is_active && focus_state == SearchFocusState::Shows;
+        let selected_index = if is_active {
+            ui.current_page_mut().selected()
+        } else {
+            None
+        };
 
-        utils::construct_list_widget(&ui.theme, show_items, is_active)
+        utils::construct_list_widget(&ui.theme, show_items, is_active, selected_index)
     };
 
     let (episode_list, n_episodes) = {
@@ -191,18 +254,16 @@ pub fn render_search_page(
             .unwrap_or_default();
 
         let is_active = is_active && focus_state == SearchFocusState::Episodes;
+        let selected_index = if is_active {
+            ui.current_page_mut().selected()
+        } else {
+            None
+        };
 
-        utils::construct_list_widget(&ui.theme, episode_items, is_active)
+        utils::construct_list_widget(&ui.theme, episode_items, is_active, selected_index)
     };
 
     // 4. Render the page's widgets
-    // Render the query input box
-    frame.render_widget(
-        line_input.widget(is_active && focus_state == SearchFocusState::Input),
-        search_input_rect,
-    );
-
-    // Render the search result windows.
     // Need mutable access to the list/table states stored inside the page state for rendering.
     let PageState::Search {
         state: page_state, ..
@@ -317,10 +378,10 @@ pub fn render_context_page(
 
             match context {
                 Context::Artist {
+                    artist,
                     top_tracks,
                     albums,
                     related_artists,
-                    ..
                 } => {
                     render_artist_context_page_windows(
                         is_active,
@@ -329,7 +390,7 @@ pub fn render_context_page(
                         ui,
                         &data,
                         rect,
-                        (top_tracks, albums, related_artists),
+                        (artist, top_tracks, albums, related_artists),
                     );
                 }
                 Context::Playlist { tracks, playlist } => {
@@ -353,6 +414,7 @@ pub fn render_context_page(
                         ui.search_filtered_items(tracks),
                         ui,
                         &data,
+                        false,
                     );
                 }
                 Context::Tracks { tracks, .. } | Context::Album { tracks, .. } => {
@@ -364,6 +426,7 @@ pub fn render_context_page(
                         ui.search_filtered_items(tracks),
                         ui,
                         &data,
+                        false,
                     );
                 }
                 Context::Show { episodes, .. } => {
@@ -489,11 +552,12 @@ pub fn render_playlists_page(
                 ui.last_playlists_page_render_info.max_visible_rows,
                 &ui.last_playlists_page_render_info.search_query,
             );
+
         if view_changed {
-            for area in &ui.last_playlists_page_render_info.render_areas {
+            for (area, _) in ui.last_playlists_page_render_info.covers.values() {
                 super::utils::clear_area(frame, *area, &ui.theme);
             }
-            ui.last_playlists_page_render_info.render_areas.clear();
+            ui.last_playlists_page_render_info.covers.clear();
             ui.last_playlists_page_render_info.rect = inner_rect;
             ui.last_playlists_page_render_info.start_row = start_row;
             ui.last_playlists_page_render_info.items_per_row = items_per_row;
@@ -502,8 +566,9 @@ pub fn render_playlists_page(
             if let PageState::Playlists { state } = ui.current_page_mut() {
                 state.rendered = false;
             }
-            // Reset the playback cover's rendered state to ensure it re-renders after a potential Kitty-wide clear command
-            ui.last_cover_image_render_info.rendered = false;
+            // Reset the playback cover so it is re-encoded and re-drawn after a potential
+            // terminal-wide clear command
+            ui.last_cover_image_render_info = crate::state::ImageRenderInfo::default();
         }
 
         let mut all_images_rendered = true;
@@ -552,30 +617,29 @@ pub fn render_playlists_page(
                         image = image.crop_imm(0, 0, w, crop_h);
                     }
 
-                    let is_already_rendered = ui.last_playlists_page_render_info.render_areas.contains(&cover_rect);
-                    if !is_already_rendered {
-                        let scale = configs.app_config.cover_img_scale;
-                        let _ = viuer::print(
-                            &image,
-                            &viuer::Config {
-                                x: cover_rect.x,
-                                y: cover_rect.y as i16,
-                                width: Some((f32::from(cover_rect.width) * scale).round() as u32),
-                                height: Some((f32::from(cover_rect.height) * scale).round() as u32),
-                                restore_cursor: true,
-                                transparent: true,
-                                ..Default::default()
-                            },
-                        );
-                        ui.last_playlists_page_render_info.render_areas.push(cover_rect);
-                    }
-
-                    for cx in cover_rect.left()..cover_rect.right() {
-                        for cy in cover_rect.top()..cover_rect.bottom() {
-                            if let Some(cell) = frame.buffer_mut().cell_mut((cx, cy)) {
-                                cell.set_skip(true);
+                    // (Re)encode the cover whenever it has not been prepared for this exact area
+                    let needs_encode = !ui
+                        .last_playlists_page_render_info
+                        .covers
+                        .get(url)
+                        .is_some_and(|(area, _)| *area == cover_rect);
+                    if needs_encode {
+                        match super::cover_image::CoverImage::new(&ui.picker, &image, cover_rect) {
+                            Ok(cover) => {
+                                ui.last_playlists_page_render_info
+                                    .covers
+                                    .insert(url.clone(), (cover_rect, cover));
+                            }
+                            Err(err) => {
+                                tracing::error!("Failed to encode playlist cover image: {err:#}");
                             }
                         }
+                    }
+
+                    if let Some((_, cover)) =
+                        ui.last_playlists_page_render_info.covers.get_mut(url)
+                    {
+                        cover.render(frame, cover_rect);
                     }
                 } else {
                     all_images_rendered = false;
@@ -683,37 +747,61 @@ pub fn render_library_page(
         })
         .collect::<Vec<_>>();
 
-    let (playlist_list, n_playlists) = utils::construct_list_widget(
-        &ui.theme,
-        items,
-        is_active && focus_state == LibraryFocusState::Playlists,
-    );
+    let is_playlist_active = is_active && focus_state == LibraryFocusState::Playlists;
+    let playlist_selected = if is_playlist_active {
+        ui.current_page_mut().selected()
+    } else {
+        None
+    };
+    let (playlist_list, n_playlists) =
+        utils::construct_list_widget(&ui.theme, items, is_playlist_active, playlist_selected);
     // Construct the saved album window
+    let is_album_active = is_active && focus_state == LibraryFocusState::SavedAlbums;
+    let album_selected = if is_album_active {
+        ui.current_page_mut().selected()
+    } else {
+        None
+    };
     let (album_list, n_albums) = utils::construct_list_widget(
         &ui.theme,
         ui.search_filtered_items(&data.user_data.saved_albums)
             .into_iter()
             .map(|a| (a.to_bidi_string(), curr_context_uri == Some(a.id.uri())))
             .collect(),
-        is_active && focus_state == LibraryFocusState::SavedAlbums,
+        is_album_active,
+        album_selected,
     );
     // Construct the followed artist window
+    let is_artist_active = is_active && focus_state == LibraryFocusState::FollowedArtists;
+    let artist_selected = if is_artist_active {
+        ui.current_page_mut().selected()
+    } else {
+        None
+    };
     let (artist_list, n_artists) = utils::construct_list_widget(
         &ui.theme,
         ui.search_filtered_items(&data.user_data.followed_artists)
             .into_iter()
             .map(|a| (a.to_bidi_string(), curr_context_uri == Some(a.id.uri())))
             .collect(),
-        is_active && focus_state == LibraryFocusState::FollowedArtists,
+        is_artist_active,
+        artist_selected,
     );
     // Construct the saved shows
+    let is_show_active = is_active && focus_state == LibraryFocusState::SavedShows;
+    let show_selected = if is_show_active {
+        ui.current_page_mut().selected()
+    } else {
+        None
+    };
     let (saved_shows_list, n_shows) = utils::construct_list_widget(
         &ui.theme,
         ui.search_filtered_items(&data.user_data.saved_shows)
             .into_iter()
             .map(|a| (a.to_string(), curr_context_uri == Some(a.id.uri())))
             .collect(),
-        is_active && focus_state == LibraryFocusState::SavedShows,
+        is_show_active,
+        show_selected,
     );
 
     // 4. Render the page's widgets
@@ -764,19 +852,30 @@ pub fn render_browse_page(
     let data = state.data.read();
 
     // 2+3. Construct the page's layout and widgets
+    let selected_index = if is_active {
+        ui.current_page_mut().selected()
+    } else {
+        None
+    };
     let (list, len) = match ui.current_page() {
         PageState::Browse { state: ui_state } => match ui_state {
             BrowsePageUIState::CategoryList { .. } => {
                 rect =
                     construct_and_render_block("Categories", &ui.theme, Borders::ALL, frame, rect);
 
+                let Some(categories) = data.browse.categories.as_deref() else {
+                    frame.render_widget(Paragraph::new("Loading..."), rect);
+                    return;
+                };
+
                 utils::construct_list_widget(
                     &ui.theme,
-                    ui.search_filtered_items(&data.browse.categories)
+                    ui.search_filtered_items(categories)
                         .into_iter()
                         .map(|c| (c.name.clone(), false))
                         .collect(),
                     is_active,
+                    selected_index,
                 )
             }
             BrowsePageUIState::CategoryPlaylistList { category, .. } => {
@@ -795,6 +894,7 @@ pub fn render_browse_page(
                         .map(|c| (c.name.clone(), false))
                         .collect(),
                     is_active,
+                    selected_index,
                 )
             }
         },
@@ -981,6 +1081,7 @@ pub fn render_queue_page(
                 .map(|a| a.name.as_str())
                 .collect::<Vec<_>>()
                 .join(", "),
+            #[allow(deprecated)]
             PlayableItem::Episode(FullEpisode { ref show, .. }) => show.publisher.clone(),
             PlayableItem::Unknown(_) => String::new(),
         }
@@ -1052,6 +1153,7 @@ pub fn render_queue_page(
 
 /// Render windows for an artist context page, which includes
 /// - A top track table
+/// - A liked songs table (tracks liked by the user from this artist)
 /// - An album table
 /// - A related artist list
 fn render_artist_context_page_windows(
@@ -1061,14 +1163,19 @@ fn render_artist_context_page_windows(
     ui: &mut UIStateGuard,
     data: &DataReadGuard,
     rect: Rect,
-    artist_data: (&[Track], &[Album], &[Artist]),
+    artist_data: (&Artist, &[Track], &[Album], &[Artist]),
 ) {
     // 1. Get data
-    let (tracks, albums, artists) = (
-        ui.search_filtered_items(artist_data.0),
+    let (artist, tracks, albums, artists) = (
+        artist_data.0,
         ui.search_filtered_items(artist_data.1),
         ui.search_filtered_items(artist_data.2),
+        ui.search_filtered_items(artist_data.3),
     );
+
+    // Collect liked tracks for this artist, sorted newest first
+    let liked_tracks = data.user_data.liked_tracks_by_artist(artist);
+    let liked_tracks_filtered = ui.search_filtered_items(&liked_tracks);
 
     let focus_state = match ui.current_page() {
         PageState::Context {
@@ -1078,26 +1185,38 @@ fn render_artist_context_page_windows(
         _ => return,
     };
 
-    // 2. Construct the page's layout
-    // top tracks window
-    let chunks = Layout::vertical([Constraint::Fill(1), Constraint::Fill(1)]).split(rect);
-    let top_tracks_rect = chunks[0];
+    // 2. Construct the page's layout: 3-row stack
+    // row 1: top tracks (full width)
+    // row 2: liked songs (full width)
+    // row 3: albums (left half) | related artists (right half)
+    let rows = Layout::vertical([
+        Constraint::Fill(1),
+        Constraint::Fill(1),
+        Constraint::Fill(2),
+    ])
+    .split(rect);
+    let top_tracks_rect = rows[0];
+    let liked_songs_rect =
+        construct_and_render_block("Liked Songs", &ui.theme, Borders::TOP, frame, rows[1]);
 
-    // albums and related artitsts windows
-    let chunks = Layout::horizontal([Constraint::Ratio(1, 2); 2]).split(chunks[1]);
+    let bot_chunks = Layout::horizontal([Constraint::Ratio(1, 2); 2]).split(rows[2]);
     let albums_rect = construct_and_render_block(
         "Albums",
         &ui.theme,
         Borders::TOP | Borders::RIGHT,
         frame,
-        chunks[0],
+        bot_chunks[0],
     );
-    let related_artists_rect =
-        construct_and_render_block("Related Artists", &ui.theme, Borders::TOP, frame, chunks[1]);
+    let related_artists_rect = construct_and_render_block(
+        "Related Artists",
+        &ui.theme,
+        Borders::TOP,
+        frame,
+        bot_chunks[1],
+    );
 
     // 3. Construct the page's widgets
     // album table
-
     let is_albums_active = is_active && focus_state == ArtistFocusState::Albums;
     let n_albums = albums.len();
     let album_rows = albums
@@ -1138,11 +1257,14 @@ fn render_artist_context_page_windows(
             .map(|a| (a.name.clone(), false))
             .collect::<Vec<_>>();
 
-        utils::construct_list_widget(
-            &ui.theme,
-            artist_items,
-            is_active && focus_state == ArtistFocusState::RelatedArtists,
-        )
+        let is_artist_active = is_active && focus_state == ArtistFocusState::RelatedArtists;
+        let selected_index = if is_artist_active {
+            ui.current_page_mut().selected()
+        } else {
+            None
+        };
+
+        utils::construct_list_widget(&ui.theme, artist_items, is_artist_active, selected_index)
     };
 
     // 4. Render the page's widgets
@@ -1154,6 +1276,18 @@ fn render_artist_context_page_windows(
         tracks,
         ui,
         data,
+        false,
+    );
+
+    render_track_table(
+        frame,
+        liked_songs_rect,
+        is_active && focus_state == ArtistFocusState::LikedSongs,
+        state,
+        liked_tracks_filtered,
+        ui,
+        data,
+        true,
     );
 
     let PageState::Context {
@@ -1179,6 +1313,7 @@ fn render_artist_context_page_windows(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_track_table(
     frame: &mut Frame,
     rect: Rect,
@@ -1187,6 +1322,7 @@ fn render_track_table(
     tracks: Vec<&Track>,
     ui: &mut UIStateGuard,
     data: &DataReadGuard,
+    is_artist_liked_songs: bool,
 ) {
     let configs = config::get_config();
     // get the current playing track's URI to decorate such track (if exists) in the track table
@@ -1212,12 +1348,27 @@ fn render_track_table(
     // enable Added column if any track in the table has added_at field specified
     let added_at_enabled = tracks.iter().any(|t| t.added_at > 0);
 
+    let selected_index = if is_active && configs.app_config.enable_relative_line_number {
+        ui.current_page_mut().selected()
+    } else {
+        None
+    };
+
     let n_tracks = tracks.len();
     let rows = tracks
         .into_iter()
         .enumerate()
         .map(|(id, t)| {
-            let track_no = (id + 1).to_string();
+            let track_no = match selected_index {
+                Some(sel_idx) => {
+                    if id == sel_idx {
+                        (id + 1).to_string()
+                    } else {
+                        (id as isize - sel_idx as isize).abs().to_string()
+                    }
+                }
+                None => (id + 1).to_string(),
+            };
             let (play_pause, style) = if playing_track_uri == t.id.uri() {
                 (playing_id.to_string(), ui.theme.current_playing())
             } else {
@@ -1309,8 +1460,16 @@ fn render_track_table(
     {
         let playable_table_state = match state {
             ContextPageUIState::Artist {
-                top_track_table, ..
-            } => top_track_table,
+                top_track_table,
+                liked_track_table,
+                ..
+            } => {
+                if is_artist_liked_songs {
+                    liked_track_table
+                } else {
+                    top_track_table
+                }
+            }
             ContextPageUIState::Playlist { track_table }
             | ContextPageUIState::Album { track_table }
             | ContextPageUIState::Tracks { track_table } => track_table,
@@ -1347,18 +1506,34 @@ fn render_episode_table(
         }
     }
 
+    let selected_index = if is_active && configs.app_config.enable_relative_line_number {
+        ui.current_page_mut().selected()
+    } else {
+        None
+    };
+
     let n_episodes = episodes.len();
     let rows = episodes
         .into_iter()
         .enumerate()
         .map(|(id, e)| {
-            let (id, style) = if playing_episode_uri == e.id.uri() {
+            let index_str = match selected_index {
+                Some(sel_idx) => {
+                    if id == sel_idx {
+                        (id + 1).to_string()
+                    } else {
+                        (id as isize - sel_idx as isize).abs().to_string()
+                    }
+                }
+                None => (id + 1).to_string(),
+            };
+            let (id_str, style) = if playing_episode_uri == e.id.uri() {
                 (playing_id.to_string(), ui.theme.current_playing())
             } else {
-                ((id + 1).to_string(), Style::default())
+                (index_str, Style::default())
             };
             Row::new(vec![
-                Cell::from(id),
+                Cell::from(id_str),
                 Cell::from(to_bidi_string(&e.name)),
                 Cell::from(e.release_date.clone()),
                 Cell::from(format!(

@@ -129,6 +129,11 @@ pub struct PlaybackMetadata {
 pub struct Device {
     pub id: String,
     pub name: String,
+    /// Whether this device is the integrated librespot player of *this* running instance.
+    ///
+    /// Used to distinguish the current app's integrated device from other `spotify-player`
+    /// instances (which may share the same device name) running elsewhere.
+    pub is_integrated: bool,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -225,7 +230,7 @@ pub struct PlaylistFolderNode {
     pub children: Vec<PlaylistFolderNode>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 /// A Spotify category
 pub struct Category {
     pub id: String,
@@ -323,6 +328,7 @@ impl Device {
         Some(Self {
             id: device.id?,
             name: device.name,
+            is_integrated: false,
         })
     }
 }
@@ -357,6 +363,7 @@ impl Track {
     /// tries to convert from a `rspotify::model::SimplifiedTrack` into `Track`
     pub fn try_from_simplified_track(track: rspotify::model::SimplifiedTrack) -> Option<Self> {
         if track.is_playable.unwrap_or(true) {
+            #[allow(deprecated)]
             let id = match track.linked_from {
                 Some(d) => d.id?,
                 None => track.id?,
@@ -381,6 +388,7 @@ impl Track {
         added_at: Option<chrono::DateTime<chrono::Utc>>,
     ) -> Option<Self> {
         if track.is_playable.unwrap_or(true) {
+            #[allow(deprecated)]
             let id = match track.linked_from {
                 Some(d) => d.id?,
                 None => track.id?,
@@ -406,7 +414,7 @@ impl Track {
 
     /// tries to convert from a `rspotify::model::PlaylistItem` into `Track`
     pub fn try_from_playlist_item(item: rspotify::model::PlaylistItem) -> Option<Self> {
-        let rspotify::model::PlayableItem::Track(track) = item.track? else {
+        let rspotify::model::PlayableItem::Track(track) = item.item? else {
             return None;
         };
 
