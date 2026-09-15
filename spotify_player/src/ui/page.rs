@@ -498,19 +498,41 @@ pub fn render_playlists_page(
         frame.render_widget(block, rect);
 
         let (img_width, img_length, item_width, item_height, items_per_row) = {
-            let img_width = configs.app_config.cover_img_width as u16;
-            let img_length = configs.app_config.cover_img_length as u16;
+            let font_ratio = {
+                let mut ratio = 0.5;
+                if let Ok(size) = crossterm::terminal::window_size() {
+                    if size.width > 0 && size.height > 0 && size.columns > 0 && size.rows > 0 {
+                        let font_width = size.width as f32 / size.columns as f32;
+                        let font_height = size.height as f32 / size.rows as f32;
+                        ratio = font_width / font_height;
+                    } else {
+                        let font_size = ui.picker.font_size();
+                        if font_size.width > 0 && font_size.height > 0 {
+                            ratio = font_size.width as f32 / font_size.height as f32;
+                        }
+                    }
+                } else {
+                    let font_size = ui.picker.font_size();
+                    if font_size.width > 0 && font_size.height > 0 {
+                        ratio = font_size.width as f32 / font_size.height as f32;
+                    }
+                }
+                ratio
+            };
+            
+            let base_img_length = if configs.app_config.cover_img_length > 0 {
+                configs.app_config.cover_img_length as u16
+            } else {
+                (configs.app_config.cover_img_width as f32 / font_ratio).round() as u16
+            };
+            
             // increase items per row by sqrt(2) to approximately double the number of items per page
-            let items_per_row = (f32::from((inner_rect.width / (img_length + 2)).max(1)) * 1.414).round() as usize;
+            let items_per_row = (f32::from((inner_rect.width / (base_img_length + 2)).max(1)) * 1.414).round() as usize;
+            let items_per_row = items_per_row.max(1);
             let item_width = inner_rect.width / items_per_row as u16;
             let img_length = item_width.saturating_sub(2);
-            let img_width = if configs.app_config.cover_img_length > 0 {
-                (f32::from(img_length) * configs.app_config.cover_img_width as f32
-                    / configs.app_config.cover_img_length as f32)
-                    .round() as u16
-            } else {
-                img_width
-            };
+            
+            let img_width = (img_length as f32 * font_ratio).round() as u16;
             let item_height = img_width + 2;
 
             (img_width, img_length, item_width, item_height, items_per_row)
@@ -551,10 +573,6 @@ pub fn render_playlists_page(
             );
 
         if view_changed {
-            for (area, _) in ui.last_playlists_page_render_info.covers.values() {
-                super::utils::clear_area(frame, *area, &ui.theme);
-            }
-            ui.last_playlists_page_render_info.covers.clear();
             ui.last_playlists_page_render_info.rect = inner_rect;
             ui.last_playlists_page_render_info.start_row = start_row;
             ui.last_playlists_page_render_info.items_per_row = items_per_row;
@@ -563,9 +581,6 @@ pub fn render_playlists_page(
             if let PageState::Playlists { state } = ui.current_page_mut() {
                 state.rendered = false;
             }
-            // Reset the playback cover so it is re-encoded and re-drawn after a potential
-            // terminal-wide clear command
-            ui.last_cover_image_render_info = crate::state::ImageRenderInfo::default();
         }
 
         let mut all_images_rendered = true;
@@ -614,12 +629,12 @@ pub fn render_playlists_page(
                         image = image.crop_imm(0, 0, w, crop_h);
                     }
 
-                    // (Re)encode the cover whenever it has not been prepared for this exact area
+                    // (Re)encode the cover whenever it has not been prepared for this dimension
                     let needs_encode = !ui
                         .last_playlists_page_render_info
                         .covers
                         .get(url)
-                        .is_some_and(|(area, _)| *area == cover_rect);
+                        .is_some_and(|(area, _)| area.width == cover_rect.width && area.height == cover_rect.height);
                     if needs_encode {
                         match super::cover_image::CoverImage::new(&ui.picker, &image, cover_rect) {
                             Ok(cover) => {
@@ -633,10 +648,11 @@ pub fn render_playlists_page(
                         }
                     }
 
-                    if let Some((_, cover)) =
+                    if let Some(entry) =
                         ui.last_playlists_page_render_info.covers.get_mut(url)
                     {
-                        cover.render(frame, cover_rect);
+                        entry.0 = cover_rect;
+                        entry.1.render(frame, cover_rect);
                     }
                 } else {
                     all_images_rendered = false;

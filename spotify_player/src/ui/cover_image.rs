@@ -18,7 +18,7 @@ pub enum CoverImage {
     /// A cursor-anchored iTerm2 inline-image escape, written directly to the terminal.
     /// `drawn` tracks whether it has been emitted yet — being grid-anchored, it only needs
     /// to be emitted once.
-    Iterm2 { escape: String, drawn: bool },
+    Iterm2 { escape: String, drawn: bool, last_area: Option<Rect> },
 }
 
 impl CoverImage {
@@ -28,6 +28,7 @@ impl CoverImage {
             Ok(Self::Iterm2 {
                 escape: encode_iterm2(img, area)?,
                 drawn: false,
+                last_area: None,
             })
         } else {
             let protocol = picker
@@ -41,8 +42,12 @@ impl CoverImage {
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         match self {
             Self::Widget(protocol) => frame.render_widget(Image::new(protocol.as_ref()), area),
-            Self::Iterm2 { escape, drawn } => {
+            Self::Iterm2 { escape, drawn, last_area } => {
                 reserve_area(frame, area);
+                if Some(area) != *last_area {
+                    *drawn = false;
+                    *last_area = Some(area);
+                }
                 if !*drawn {
                     if let Err(err) = write_iterm2(escape, area) {
                         tracing::error!("Failed to draw iTerm2 cover image: {err:#}");
@@ -73,7 +78,7 @@ fn encode_iterm2(img: &DynamicImage, area: Rect) -> Result<String> {
         .context("encode cover image to PNG")?;
     let data = base64::engine::general_purpose::STANDARD.encode(&png);
     Ok(format!(
-        "\x1b]1337;File=inline=1;preserveAspectRatio=1;size={};width={};height={}:{data}\x07",
+        "\x1b]1337;File=inline=1;preserveAspectRatio=0;size={};width={};height={}:{data}\x07",
         png.len(),
         area.width,
         area.height,

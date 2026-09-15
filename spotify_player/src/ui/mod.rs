@@ -40,6 +40,7 @@ pub fn run(state: &SharedState, mut terminal: Terminal) -> Result<()> {
         config::get_config().app_config.app_refresh_duration_in_ms,
     );
     let mut last_terminal_size = None;
+    let mut last_overlay_state = false;
 
     loop {
         {
@@ -50,12 +51,16 @@ pub fn run(state: &SharedState, mut terminal: Terminal) -> Result<()> {
             }
 
             let terminal_size = terminal.size()?;
-            if Some(terminal_size) != last_terminal_size {
+            let overlay_state = ui.popup.is_some() || !ui.input_key_sequence.keys.is_empty();
+
+            if Some(terminal_size) != last_terminal_size || overlay_state != last_overlay_state {
                 last_terminal_size = Some(terminal_size);
+                last_overlay_state = overlay_state;
                 #[cfg(feature = "image")]
                 {
-                    // redraw the cover image when the terminal's size changes
+                    // redraw the cover image when the terminal's size or overlay state changes
                     ui.last_cover_image_render_info = ImageRenderInfo::default();
+                    ui.last_playlists_page_render_info.covers.clear();
                     if let PageState::Playlists { state } = ui.current_page_mut() {
                         state.rendered = false;
                     }
@@ -180,9 +185,6 @@ fn render_main_layout(
     {
         if page_type != PageType::Playlists && !ui.last_playlists_page_render_info.covers.is_empty()
         {
-            for (area, _) in ui.last_playlists_page_render_info.covers.values() {
-                utils::clear_area(frame, *area, &ui.theme);
-            }
             ui.last_playlists_page_render_info.rendered = false;
             ui.last_playlists_page_render_info.covers.clear();
         }

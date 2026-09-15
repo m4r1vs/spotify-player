@@ -96,7 +96,8 @@ pub fn render_playback_window(
                         let data = state.data.read();
                         if let Some(img) = data.caches.images.get(&url) {
                             if ui.last_cover_image_render_info.url != url
-                                || ui.last_cover_image_render_info.render_area != cover_img_rect
+                                || ui.last_cover_image_render_info.render_area.width != cover_img_rect.width
+                                || ui.last_cover_image_render_info.render_area.height != cover_img_rect.height
                             {
                                 let state = match crate::ui::cover_image::CoverImage::new(
                                     &ui.picker,
@@ -115,6 +116,7 @@ pub fn render_playback_window(
                                     state,
                                 };
                             }
+                            ui.last_cover_image_render_info.render_area = cover_img_rect;
                             let area = ui.last_cover_image_render_info.render_area;
                             if let Some(cover) = ui.last_cover_image_render_info.state.as_mut() {
                                 cover.render(frame, area);
@@ -229,9 +231,26 @@ fn cover_img_length(configs: &config::Configs, picker: &ratatui_image::picker::P
     match configs.app_config.cover_img_length {
         // When `cover_img_length` is `0` (the default), derive it from the terminal's cell aspect ratio
         0 => {
-            let font_size = picker.font_size();
-            let rows = configs.app_config.cover_img_width as u16;
-            rows * font_size.height / font_size.width
+            let mut ratio = 0.5;
+            if let Ok(size) = crossterm::terminal::window_size() {
+                if size.width > 0 && size.height > 0 && size.columns > 0 && size.rows > 0 {
+                    let font_width = size.width as f32 / size.columns as f32;
+                    let font_height = size.height as f32 / size.rows as f32;
+                    ratio = font_width / font_height;
+                } else {
+                    let font_size = picker.font_size();
+                    if font_size.width > 0 && font_size.height > 0 {
+                        ratio = font_size.width as f32 / font_size.height as f32;
+                    }
+                }
+            } else {
+                let font_size = picker.font_size();
+                if font_size.width > 0 && font_size.height > 0 {
+                    ratio = font_size.width as f32 / font_size.height as f32;
+                }
+            }
+            let rows = configs.app_config.cover_img_width as f32;
+            (rows / ratio).round() as u16
         }
         length => length as u16,
     }
