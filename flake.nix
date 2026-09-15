@@ -31,12 +31,13 @@
             ];
             buildInputs = [
               # spotify-player dependencies
-              alsa-lib
-              dbus
               fontconfig
-              dbus-glib
               libsixel
               openssl
+            ] ++ lib.optionals stdenv.hostPlatform.isLinux [
+              alsa-lib
+              dbus
+              dbus-glib
               libpulseaudio
             ];
           };
