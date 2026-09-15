@@ -134,3 +134,24 @@ Base the description on the actual branch diff (`git diff master...<branch>`), n
 - Prefer plain prose over filler; omit empty sections. Add a short **Notes** section only for non-obvious trade-offs or follow-ups.
 
 Output the description as raw markdown in a fenced code block so it can be copied and pasted directly into the PR.
+
+## Custom Fork Changes
+
+This repository is a custom fork that introduces several features and modifications over the upstream `spotify-player`. When working on this codebase, keep these custom additions in mind:
+
+### UI and Pages
+- **Playlist Page**: A dedicated page for playlists (`PLAYLIST_PAGE.md`), including features like centering content, peeking the next row to fill empty space, filtering out duplicate playlists, and async loading of cover images (with pixelation support).
+- **Podcasts in Library**: Podcast shows (`SavedShows`) are now displayed on the library view, complete with a custom animation and testing/debugging environment (via the `debugging/` crate).
+- **Custom Title**: Added a `title` configuration option to allow setting a custom ASCII art as the app title.
+
+### Commands and Actions
+- **Quickplay Command**: Added a `quickplay` command for faster playback initiation without opening context menus.
+- **CreatePlaylistFromAlbum**: A new action that allows users to create a playlist directly from all songs in an album.
+
+### Configuration
+- **`default_page`**: Added a configuration option to set the initial page on startup.
+- **`playlist_page_default`**: Added a configuration option to control playlist page defaults.
+
+### Architecture & Environment
+- **State Channels**: `SharedState` now carries a clone of `client_pub` (`flume::Sender<client::ClientRequest>`) to make it easier to dispatch Spotify client requests from anywhere.
+- **Nix Dev Flake**: Updated `flake.nix` with additional build dependencies (e.g., `cmake`, `libtool`, `rust-analyzer`, `fontconfig`) and fixed it so it does not evaluate Linux-only ALSA and DBus libraries on macOS.

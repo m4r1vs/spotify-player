@@ -27,6 +27,7 @@ pub struct State {
     pub ui: Mutex<UIState>,
     pub player: RwLock<PlayerState>,
     pub data: RwLock<AppData>,
+    #[allow(dead_code)]
     pub client_sender: flume::Sender<crate::client::ClientRequest>,
 
     pub is_daemon: bool,

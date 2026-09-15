@@ -447,11 +447,12 @@ pub fn render_context_page(
     }
 }
 
+#[allow(unused_variables)]
 pub fn render_playlists_page(
-    _is_active: bool,
-    _frame: &mut Frame,
-    _state: &SharedState,
-    _ui: &mut UIStateGuard,
+    is_active: bool,
+    frame: &mut Frame,
+    state: &SharedState,
+    ui: &mut UIStateGuard,
     rect: Rect,
 ) {
     #[cfg(not(feature = "image"))]
@@ -460,15 +461,11 @@ pub fn render_playlists_page(
         let p = Paragraph::new(text)
             .alignment(Alignment::Center)
             .block(Block::default().borders(Borders::ALL).title("Playlists"));
-        _frame.render_widget(p, rect);
+        frame.render_widget(p, rect);
     }
 
     #[cfg(feature = "image")]
     {
-        let is_active = _is_active;
-        let frame = _frame;
-        let state = _state;
-        let ui = _ui;
         let mut flat_playlists = vec![];
         {
             let data = state.data.read();
@@ -504,11 +501,11 @@ pub fn render_playlists_page(
             let img_width = configs.app_config.cover_img_width as u16;
             let img_length = configs.app_config.cover_img_length as u16;
             // increase items per row by sqrt(2) to approximately double the number of items per page
-            let items_per_row = ((inner_rect.width / (img_length + 2)).max(1) as f32 * 1.414).round() as usize;
+            let items_per_row = (f32::from((inner_rect.width / (img_length + 2)).max(1)) * 1.414).round() as usize;
             let item_width = inner_rect.width / items_per_row as u16;
             let img_length = item_width.saturating_sub(2);
             let img_width = if configs.app_config.cover_img_length > 0 {
-                (img_length as f32 * configs.app_config.cover_img_width as f32
+                (f32::from(img_length) * configs.app_config.cover_img_width as f32
                     / configs.app_config.cover_img_length as f32)
                     .round() as u16
             } else {
@@ -613,7 +610,7 @@ pub fn render_playlists_page(
                     if available_cover_height < img_width {
                         use image::GenericImageView;
                         let (w, h) = image.dimensions();
-                        let crop_h = (h as f32 * (available_cover_height as f32 / img_width as f32)).round() as u32;
+                        let crop_h = (h as f32 * (f32::from(available_cover_height) / f32::from(img_width))).round() as u32;
                         image = image.crop_imm(0, 0, w, crop_h);
                     }
 
@@ -1328,7 +1325,7 @@ fn render_track_table(
     // get the current playing track's URI to decorate such track (if exists) in the track table
     let mut playing_track_uri = String::new();
     let mut playing_id = "";
-    let play_icon = play_animation(vec!["󰕿".to_string(), "󰖀".to_string(), "󰕾".to_string()]);
+    let play_icon = play_animation(&["󰕿".to_string(), "󰖀".to_string(), "󰕾".to_string()]);
     if let Some(ref playback) = state.player.read().playback {
         if let Some(rspotify::model::PlayableItem::Track(ref track)) = playback.item {
             playing_track_uri = track
@@ -1493,7 +1490,7 @@ fn render_episode_table(
     // get the current playing episode's URI to decorate such episode (if exists) in the episode table
     let mut playing_episode_uri = String::new();
     let mut playing_id = "";
-    let play_icon = play_animation(vec!["󰕿".to_string(), "󰖀".to_string(), "󰕾".to_string()]);
+    let play_icon = play_animation(&["󰕿".to_string(), "󰖀".to_string(), "󰕾".to_string()]);
     if let Some(ref playback) = state.player.read().playback {
         if let Some(rspotify::model::PlayableItem::Episode(ref episode)) = playback.item {
             playing_episode_uri = episode.id.uri();

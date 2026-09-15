@@ -76,6 +76,7 @@ fn init_logging(
 }
 
 #[tokio::main]
+#[allow(clippy::needless_pass_by_value)]
 async fn start_app(
     state: &state::SharedState,
     client_pub: flume::Sender<client::ClientRequest>,

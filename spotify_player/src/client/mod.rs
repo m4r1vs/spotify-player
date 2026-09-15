@@ -1936,9 +1936,8 @@ impl AppClient {
         album_name: &str,
     ) -> Result<()> {
         let context = self.album_context(album_id).await?;
-        let tracks = match context {
-            Context::Album { tracks, .. } => tracks,
-            _ => return Err(anyhow::anyhow!("Expected album context")),
+        let Context::Album { tracks, .. } = context else {
+            return Err(anyhow::anyhow!("Expected album context"));
         };
 
         let user_id = state

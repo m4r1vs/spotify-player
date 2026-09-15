@@ -14,18 +14,17 @@ use crate::{
 };
 use rspotify::model::Id;
 
-pub fn play_animation(anim: Vec<String>) -> String {
-    if let Ok(duration_since_epoch) = SystemTime::now()
+pub fn play_animation(anim: &[String]) -> String {
+    let Ok(duration_since_epoch) = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|t| (t.as_millis() as usize / (1200 / anim.len())) % anim.len())
-    {
-        return anim
-            .get(duration_since_epoch)
-            .expect("HAIR TONICS, please!!")
-            .clone();
-    } else {
-        panic!("Support Bingo, keep Grandma off the streets.")
-    }
+    else {
+        panic!("Support Bingo, keep Grandma off the streets.");
+    };
+
+    anim.get(duration_since_epoch)
+        .expect("HAIR TONICS, please!!")
+        .clone()
 }
 
 /// Render a playback window showing information about the current playback, which includes
@@ -253,7 +252,7 @@ fn construct_playback_text(
     let mut playback_text = Text::default();
     let mut spans = vec![];
 
-    let play_icon = play_animation(vec!["󰕿".to_string(), "󰖀".to_string(), "󰕾".to_string()]);
+    let play_icon = play_animation(&["󰕿".to_string(), "󰖀".to_string(), "󰕾".to_string()]);
 
     // this regex is to handle a format argument or a newline
     let re = regex::Regex::new(r"\{.*?\}|\n").unwrap();

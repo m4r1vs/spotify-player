@@ -50,7 +50,9 @@ pub fn construct_and_render_block(
     inner_rect
 }
 
+#[allow(dead_code)]
 pub fn clear_area(frame: &mut Frame, rect: Rect, theme: &config::Theme) {
+    use std::io::Write;
     for x in rect.left()..rect.right() {
         for y in rect.top()..rect.bottom() {
             if let Some(cell) = frame.buffer_mut().cell_mut((x, y)) {
@@ -65,7 +67,6 @@ pub fn clear_area(frame: &mut Frame, rect: Rect, theme: &config::Theme) {
     // Explicitly clear images in the area for terminals supporting Kitty graphics protocol.
     // We move the cursor to each cell and send the "delete image at cursor" command.
     // This is more reliable than "delete by cell coordinates" which can sometimes have coordinate mismatches.
-    use std::io::Write;
     let mut stdout = std::io::stdout();
     for x in rect.left()..rect.right() {
         for y in rect.top()..rect.bottom() {
