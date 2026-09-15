@@ -24,6 +24,10 @@ pub enum CoverImage {
 impl CoverImage {
     /// Prepare `img` for rendering into `area` using the protocol selected by `picker`.
     pub fn new(picker: &Picker, img: &DynamicImage, area: Rect) -> Result<Self> {
+        if area.width == 0 || area.height == 0 {
+            anyhow::bail!("cannot encode image for empty area");
+        }
+
         if picker.protocol_type() == ProtocolType::Iterm2 {
             Ok(Self::Iterm2 {
                 escape: encode_iterm2(img, area)?,
@@ -31,8 +35,18 @@ impl CoverImage {
                 last_area: None,
             })
         } else {
+            // ratatui_image's Resize::Fit will preserve aspect ratio and add transparent padding if
+            // the image's physical aspect ratio doesn't perfectly match the cell block's physical
+            // aspect ratio. To eliminate gaps, we manually stretch the image to exactly match the
+            // cell block's pixel dimensions before passing it.
+            let font_size = picker.font_size();
+            let pixel_width = area.width as u32 * if font_size.width > 0 { font_size.width as u32 } else { 1 };
+            let pixel_height = area.height as u32 * if font_size.height > 0 { font_size.height as u32 } else { 2 };
+            
+            let stretched_img = img.resize_exact(pixel_width, pixel_height, image::imageops::FilterType::Triangle);
+            
             let protocol = picker
-                .new_protocol(img.clone(), area.into(), Resize::Fit(None))
+                .new_protocol(stretched_img, area.into(), Resize::Fit(None))
                 .context("encode cover image protocol")?;
             Ok(Self::Widget(Box::new(protocol)))
         }
