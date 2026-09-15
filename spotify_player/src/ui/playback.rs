@@ -1,6 +1,5 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-
 use super::{
     config, utils::construct_and_render_block, Alignment, Borders, Constraint, Frame, Gauge,
     Layout, Line, LineGauge, Modifier, Paragraph, PlaybackMetadata, Rect, SharedState, Span, Style,
@@ -93,13 +92,15 @@ pub fn render_playback_window(
                         rspotify::model::PlayableItem::Unknown(_) => None,
                     };
                     if let Some(url) = url {
-                        let data = state.data.read();
-                        if let Some(img) = data.caches.images.get(&url) {
-                            if ui.last_cover_image_render_info.url != url
-                                || ui.last_cover_image_render_info.render_area.width != cover_img_rect.width
-                                || ui.last_cover_image_render_info.render_area.height != cover_img_rect.height
-                            {
-                                let state = match crate::ui::cover_image::CoverImage::new(
+                        let needs_encode = ui.last_cover_image_render_info.url != url
+                            || ui.last_cover_image_render_info.render_area.width != cover_img_rect.width
+                            || ui.last_cover_image_render_info.render_area.height != cover_img_rect.height
+                            || ui.last_cover_image_render_info.state.is_none();
+
+                        if needs_encode {
+                            let data = state.data.read();
+                            if let Some(img) = data.caches.images.get(&url) {
+                                let cover_state = match crate::ui::cover_image::CoverImage::new(
                                     &ui.picker,
                                     img,
                                     cover_img_rect,
@@ -111,11 +112,21 @@ pub fn render_playback_window(
                                     }
                                 };
                                 ui.last_cover_image_render_info = ImageRenderInfo {
-                                    url,
+                                    url: url.clone(),
                                     render_area: cover_img_rect,
-                                    state,
+                                    state: cover_state,
                                 };
+                            } else if ui.last_cover_image_render_info.url != url {
+                                ui.last_cover_image_render_info = ImageRenderInfo {
+                                    url: url.clone(),
+                                    render_area: cover_img_rect,
+                                    state: None,
+                                };
+                                state.client_sender.send(crate::client::ClientRequest::LoadImage(url.clone())).unwrap_or_default();
                             }
+                        }
+
+                        if ui.last_cover_image_render_info.url == url {
                             ui.last_cover_image_render_info.render_area = cover_img_rect;
                             let area = ui.last_cover_image_render_info.render_area;
                             if let Some(cover) = ui.last_cover_image_render_info.state.as_mut() {
@@ -234,19 +245,19 @@ fn cover_img_length(configs: &config::Configs, picker: &ratatui_image::picker::P
             let mut ratio = 0.5;
             if let Ok(size) = crossterm::terminal::window_size() {
                 if size.width > 0 && size.height > 0 && size.columns > 0 && size.rows > 0 {
-                    let font_width = size.width as f32 / size.columns as f32;
-                    let font_height = size.height as f32 / size.rows as f32;
+                    let font_width = f32::from(size.width) / f32::from(size.columns);
+                    let font_height = f32::from(size.height) / f32::from(size.rows);
                     ratio = font_width / font_height;
                 } else {
                     let font_size = picker.font_size();
                     if font_size.width > 0 && font_size.height > 0 {
-                        ratio = font_size.width as f32 / font_size.height as f32;
+                        ratio = f32::from(font_size.width) / f32::from(font_size.height);
                     }
                 }
             } else {
                 let font_size = picker.font_size();
                 if font_size.width > 0 && font_size.height > 0 {
-                    ratio = font_size.width as f32 / font_size.height as f32;
+                    ratio = f32::from(font_size.width) / f32::from(font_size.height);
                 }
             }
             let rows = configs.app_config.cover_img_width as f32;

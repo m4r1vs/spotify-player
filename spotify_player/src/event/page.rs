@@ -31,7 +31,9 @@ pub fn handle_key_sequence_for_page(
             PageType::Queue => Ok(handle_command_for_queue_page(command, ui)),
             PageType::CommandHelp => Ok(handle_command_for_command_help_page(command, ui)),
             PageType::Logs => Ok(handle_command_for_logs_page(command, ui)),
-            PageType::Playlists => Ok(handle_command_for_playlists_page(command, client_pub, ui, state)),
+            PageType::Playlists => Ok(handle_command_for_playlists_page(
+                command, client_pub, ui, state,
+            )),
         },
         Some(CommandOrAction::Action(action, ActionTarget::SelectedItem)) => match page_type {
             PageType::Search => anyhow::bail!("page search type should already be handled!"),
@@ -305,11 +307,9 @@ fn handle_key_sequence_for_search_page(
                 .unwrap_or_default();
 
             match found_keymap {
-                CommandOrAction::Command(command) => {
-                    window::handle_command_for_artist_list_window(
-                        command, &artists, &data, ui, client_pub,
-                    )
-                }
+                CommandOrAction::Command(command) => window::handle_command_for_artist_list_window(
+                    command, &artists, &data, ui, client_pub,
+                ),
                 CommandOrAction::Action(action, ActionTarget::SelectedItem) => {
                     window::handle_action_for_selected_item(action, &artists, &data, ui, client_pub)
                 }
@@ -370,9 +370,9 @@ fn handle_key_sequence_for_search_page(
                 .unwrap_or_default();
 
             match found_keymap {
-                CommandOrAction::Command(command) => {
-                    window::handle_command_for_show_list_window(command, &shows, &data, ui, client_pub)
-                }
+                CommandOrAction::Command(command) => window::handle_command_for_show_list_window(
+                    command, &shows, &data, ui, client_pub,
+                ),
                 CommandOrAction::Action(action, ActionTarget::SelectedItem) => {
                     window::handle_action_for_selected_item(action, &shows, &data, ui, client_pub)
                 }

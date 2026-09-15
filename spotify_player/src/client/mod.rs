@@ -8,10 +8,10 @@ use crate::{
     auth::AuthConfig,
     state::{
         store_data_into_file_cache, Album, AlbumId, Artist, ArtistId, Category, Context, ContextId,
-        Device, FileCacheKey, Item, ItemId, MemoryCaches, PlayableId, Playback, PlaybackMetadata, Playlist,
-        PlaylistFolderItem, PlaylistId, SearchResults, SharedState, Show, ShowId, Track, TrackId,
-        UserId, TTL_CACHE_DURATION, USER_LIKED_TRACKS_URI, USER_RECENTLY_PLAYED_TRACKS_URI,
-        USER_TOP_TRACKS_URI,
+        Device, FileCacheKey, Item, ItemId, MemoryCaches, PlayableId, Playback, PlaybackMetadata,
+        Playlist, PlaylistFolderItem, PlaylistId, SearchResults, SharedState, Show, ShowId, Track,
+        TrackId, UserId, TTL_CACHE_DURATION, USER_LIKED_TRACKS_URI,
+        USER_RECENTLY_PLAYED_TRACKS_URI, USER_TOP_TRACKS_URI,
     },
 };
 
@@ -546,8 +546,9 @@ impl AppClient {
                             tokio::spawn(async move {
                                 let contains = state.data.read().caches.images.contains_key(&url);
                                 if !contains {
-                                   let _ = client.load_image_internal(state, url).await;
-                                }                            });
+                                    let _ = client.load_image_internal(state, url).await;
+                                }
+                            });
                         }
                     }
                 }
@@ -2141,19 +2142,27 @@ impl AppClient {
         let configs = config::get_config();
         let filename = url.replace('/', "");
         let path = configs.cache_folder.join("image").join(filename);
-        let bytes = self.retrieve_image(&url, &path, configs.app_config.enable_cover_image_cache).await?;
-        
+        let bytes = self
+            .retrieve_image(&url, &path, configs.app_config.enable_cover_image_cache)
+            .await?;
+
         #[cfg(not(feature = "pixelate"))]
         let image = image::load_from_memory(&bytes).context("Failed to load image from memory")?;
         #[cfg(feature = "pixelate")]
-        let mut image = image::load_from_memory(&bytes).context("Failed to load image from memory")?;
-        
+        let mut image =
+            image::load_from_memory(&bytes).context("Failed to load image from memory")?;
+
         #[cfg(feature = "pixelate")]
         {
             Self::pixelate_image(&mut image);
         }
-        
-        state.data.write().caches.images.insert(url, image, *TTL_CACHE_DURATION);
+
+        state
+            .data
+            .write()
+            .caches
+            .images
+            .insert(url, image, *TTL_CACHE_DURATION);
         Ok(())
     }
 }

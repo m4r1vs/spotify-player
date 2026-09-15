@@ -18,7 +18,11 @@ pub enum CoverImage {
     /// A cursor-anchored iTerm2 inline-image escape, written directly to the terminal.
     /// `drawn` tracks whether it has been emitted yet — being grid-anchored, it only needs
     /// to be emitted once.
-    Iterm2 { escape: String, drawn: bool, last_area: Option<Rect> },
+    Iterm2 {
+        escape: String,
+        drawn: bool,
+        last_area: Option<Rect>,
+    },
 }
 
 impl CoverImage {
@@ -40,11 +44,25 @@ impl CoverImage {
             // aspect ratio. To eliminate gaps, we manually stretch the image to exactly match the
             // cell block's pixel dimensions before passing it.
             let font_size = picker.font_size();
-            let pixel_width = area.width as u32 * if font_size.width > 0 { font_size.width as u32 } else { 1 };
-            let pixel_height = area.height as u32 * if font_size.height > 0 { font_size.height as u32 } else { 2 };
-            
-            let stretched_img = img.resize_exact(pixel_width, pixel_height, image::imageops::FilterType::Triangle);
-            
+            let pixel_width = u32::from(area.width)
+                * if font_size.width > 0 {
+                    u32::from(font_size.width)
+                } else {
+                    1
+                };
+            let pixel_height = u32::from(area.height)
+                * if font_size.height > 0 {
+                    u32::from(font_size.height)
+                } else {
+                    2
+                };
+
+            let stretched_img = img.resize_exact(
+                pixel_width,
+                pixel_height,
+                image::imageops::FilterType::Triangle,
+            );
+
             let protocol = picker
                 .new_protocol(stretched_img, area.into(), Resize::Fit(None))
                 .context("encode cover image protocol")?;
@@ -56,7 +74,11 @@ impl CoverImage {
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         match self {
             Self::Widget(protocol) => frame.render_widget(Image::new(protocol.as_ref()), area),
-            Self::Iterm2 { escape, drawn, last_area } => {
+            Self::Iterm2 {
+                escape,
+                drawn,
+                last_area,
+            } => {
                 reserve_area(frame, area);
                 if Some(area) != *last_area {
                     *drawn = false;

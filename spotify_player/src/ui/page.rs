@@ -11,15 +11,15 @@ use crate::{
     utils::format_duration,
 };
 
-use super::{
-    config, playback::play_animation, utils, utils::construct_and_render_block, Album, Alignment, Artist, ArtistFocusState,
-    Block, Borders, BrowsePageUIState, Cell, Constraint, Context, ContextPageUIState, DataReadGuard,
-    Frame, Id, Layout, LibraryFocusState, MutableWindowState, Orientation, PageState, Paragraph,
-    PlaylistFolderItem, Rect, Row, SearchFocusState, SharedState, Style, Table, Text, Track,
-    UIStateGuard,
-};
 #[cfg(feature = "image")]
 use super::PopupState;
+use super::{
+    config, playback::play_animation, utils, utils::construct_and_render_block, Album, Alignment,
+    Artist, ArtistFocusState, Block, Borders, BrowsePageUIState, Cell, Constraint, Context,
+    ContextPageUIState, DataReadGuard, Frame, Id, Layout, LibraryFocusState, MutableWindowState,
+    Orientation, PageState, Paragraph, PlaylistFolderItem, Rect, Row, SearchFocusState,
+    SharedState, Style, Table, Text, Track, UIStateGuard,
+};
 use crate::state::BidiDisplay;
 use crate::ui::utils::to_bidi_string;
 
@@ -491,9 +491,7 @@ pub fn render_playlists_page(
         }
 
         let configs = crate::config::get_config();
-        let block = Block::default()
-            .title("Playlists")
-            .borders(Borders::ALL);
+        let block = Block::default().title("Playlists").borders(Borders::ALL);
         let inner_rect = block.inner(rect);
         frame.render_widget(block, rect);
 
@@ -502,40 +500,48 @@ pub fn render_playlists_page(
                 let mut ratio = 0.5;
                 if let Ok(size) = crossterm::terminal::window_size() {
                     if size.width > 0 && size.height > 0 && size.columns > 0 && size.rows > 0 {
-                        let font_width = size.width as f32 / size.columns as f32;
-                        let font_height = size.height as f32 / size.rows as f32;
+                        let font_width = f32::from(size.width) / f32::from(size.columns);
+                        let font_height = f32::from(size.height) / f32::from(size.rows);
                         ratio = font_width / font_height;
                     } else {
                         let font_size = ui.picker.font_size();
                         if font_size.width > 0 && font_size.height > 0 {
-                            ratio = font_size.width as f32 / font_size.height as f32;
+                            ratio = f32::from(font_size.width) / f32::from(font_size.height);
                         }
                     }
                 } else {
                     let font_size = ui.picker.font_size();
                     if font_size.width > 0 && font_size.height > 0 {
-                        ratio = font_size.width as f32 / font_size.height as f32;
+                        ratio = f32::from(font_size.width) / f32::from(font_size.height);
                     }
                 }
                 ratio
             };
-            
+
             let base_img_length = if configs.app_config.cover_img_length > 0 {
                 configs.app_config.cover_img_length as u16
             } else {
                 (configs.app_config.cover_img_width as f32 / font_ratio).round() as u16
             };
-            
+
             // increase items per row by sqrt(2) to approximately double the number of items per page
-            let items_per_row = (f32::from((inner_rect.width / (base_img_length + 2)).max(1)) * 1.414).round() as usize;
+            let items_per_row = (f32::from((inner_rect.width / (base_img_length + 2)).max(1))
+                * 1.414)
+                .round() as usize;
             let items_per_row = items_per_row.max(1);
             let item_width = inner_rect.width / items_per_row as u16;
             let img_length = item_width.saturating_sub(2);
-            
-            let img_width = (img_length as f32 * font_ratio).round() as u16;
+
+            let img_width = (f32::from(img_length) * font_ratio).round() as u16;
             let item_height = img_width + 2;
 
-            (img_width, img_length, item_width, item_height, items_per_row)
+            (
+                img_width,
+                img_length,
+                item_width,
+                item_height,
+                items_per_row,
+            )
         };
 
         if inner_rect.width < 3 || inner_rect.height < item_height {
@@ -563,14 +569,19 @@ pub fn render_playlists_page(
             _ => String::new(),
         };
 
-        let view_changed = (inner_rect, start_row, items_per_row, max_visible_rows, &search_query)
-            != (
-                ui.last_playlists_page_render_info.rect,
-                ui.last_playlists_page_render_info.start_row,
-                ui.last_playlists_page_render_info.items_per_row,
-                ui.last_playlists_page_render_info.max_visible_rows,
-                &ui.last_playlists_page_render_info.search_query,
-            );
+        let view_changed = (
+            inner_rect,
+            start_row,
+            items_per_row,
+            max_visible_rows,
+            &search_query,
+        ) != (
+            ui.last_playlists_page_render_info.rect,
+            ui.last_playlists_page_render_info.start_row,
+            ui.last_playlists_page_render_info.items_per_row,
+            ui.last_playlists_page_render_info.max_visible_rows,
+            &ui.last_playlists_page_render_info.search_query,
+        );
 
         if view_changed {
             ui.last_playlists_page_render_info.rect = inner_rect;
@@ -591,20 +602,29 @@ pub fn render_playlists_page(
             let row = i / items_per_row;
             let col = i % items_per_row;
 
-            let y_offset = (row.saturating_sub(start_row)) as u16 * item_height;
-            if row < start_row || y_offset >= inner_rect.height {
+            if row < start_row || row >= start_row + 3 * max_visible_rows {
                 continue;
             }
 
-            let x = inner_rect.x + left_margin + (col as u16 * item_width);
-            let y = inner_rect.y + y_offset;
+            let y_offset = (row.saturating_sub(start_row)) as u16 * item_height;
+            let is_visible = y_offset < inner_rect.height;
 
-            let available_height = inner_rect.height.saturating_sub(y_offset);
-            let available_cover_height = available_height.min(img_width);
+            let x = inner_rect.x + left_margin + (col as u16 * item_width);
+            let y = if is_visible {
+                inner_rect.y + y_offset
+            } else {
+                inner_rect.y
+            };
+
+            let available_cover_height = if is_visible {
+                inner_rect.height.saturating_sub(y_offset).min(img_width)
+            } else {
+                img_width
+            };
 
             let cover_rect = Rect::new(x, y, img_length, available_cover_height);
 
-            if available_height > img_width {
+            if is_visible && inner_rect.height.saturating_sub(y_offset) > img_width {
                 let title_rect = Rect::new(x, y + img_width, img_length, 1);
                 let mut style = Style::default();
                 if i == selected_index && is_active {
@@ -619,49 +639,82 @@ pub fn render_playlists_page(
             }
 
             if let Some(url) = &p.cover_url {
-                let image = state.data.read().caches.images.get(url).cloned();
+                let needs_encode = !ui
+                    .last_playlists_page_render_info
+                    .covers
+                    .get(url)
+                    .is_some_and(|(area, _)| {
+                        area.width == cover_rect.width && area.height == cover_rect.height
+                    });
 
-                if let Some(mut image) = image {
-                    if available_cover_height < img_width {
-                        use image::GenericImageView;
-                        let (w, h) = image.dimensions();
-                        let crop_h = (h as f32 * (f32::from(available_cover_height) / f32::from(img_width))).round() as u32;
-                        image = image.crop_imm(0, 0, w, crop_h);
-                    }
+                let encode_success = !needs_encode;
 
-                    // (Re)encode the cover whenever it has not been prepared for this dimension
-                    let needs_encode = !ui
-                        .last_playlists_page_render_info
-                        .covers
-                        .get(url)
-                        .is_some_and(|(area, _)| area.width == cover_rect.width && area.height == cover_rect.height);
-                    if needs_encode {
-                        match super::cover_image::CoverImage::new(&ui.picker, &image, cover_rect) {
-                            Ok(cover) => {
-                                ui.last_playlists_page_render_info
-                                    .covers
-                                    .insert(url.clone(), (cover_rect, cover));
-                            }
-                            Err(err) => {
-                                tracing::error!("Failed to encode playlist cover image: {err:#}");
-                            }
+                if needs_encode {
+                    let image_exists = state.data.read().caches.images.contains_key(url);
+                    
+                    if image_exists {
+                        all_images_rendered = false;
+                        if ui.last_playlists_page_render_info.encoding_tasks.insert((url.clone(), cover_rect)) {
+                            let state_clone = state.clone();
+                            let url_clone = url.clone();
+                            let picker = ui.picker.clone();
+                            
+                            std::thread::spawn(move || {
+                                let image = {
+                                    let data = state_clone.data.read();
+                                    data.caches.images.get(&url_clone).cloned()
+                                };
+                                
+                                if let Some(mut image) = image {
+                                    if available_cover_height < img_width {
+                                        use image::GenericImageView;
+                                        let (w, h) = image.dimensions();
+                                        let crop_h = (h as f32
+                                            * (f32::from(available_cover_height) / f32::from(img_width)))
+                                        .round() as u32;
+                                        image = image.crop_imm(0, 0, w, crop_h);
+                                    }
+                                    
+                                    let result = super::cover_image::CoverImage::new(&picker, &image, cover_rect);
+                                    
+                                    let mut ui = state_clone.ui.lock();
+                                    ui.last_playlists_page_render_info.encoding_tasks.remove(&(url_clone.clone(), cover_rect));
+                                    match result {
+                                        Ok(cover) => {
+                                            ui.last_playlists_page_render_info.covers.insert(
+                                                url_clone,
+                                                (cover_rect, cover),
+                                                *crate::state::TTL_CACHE_DURATION,
+                                            );
+                                        }
+                                        Err(err) => {
+                                            tracing::error!("Failed to encode playlist cover image: {err:#}");
+                                        }
+                                    }
+                                } else {
+                                    let mut ui = state_clone.ui.lock();
+                                    ui.last_playlists_page_render_info.encoding_tasks.remove(&(url_clone, cover_rect));
+                                }
+                            });
+                        }
+                    } else {
+                        all_images_rendered = false;
+                        let is_rendered = match ui.current_page() {
+                            PageState::Playlists { state } => state.rendered,
+                            _ => false,
+                        };
+                        if !is_rendered {
+                            state.client_sender.send(crate::client::ClientRequest::LoadImage(url.clone())).unwrap_or_default();
                         }
                     }
+                }
 
-                    if let Some(entry) =
-                        ui.last_playlists_page_render_info.covers.get_mut(url)
-                    {
+                if encode_success {
+                    if let Some(entry) = ui.last_playlists_page_render_info.covers.get_mut(url) {
                         entry.0 = cover_rect;
-                        entry.1.render(frame, cover_rect);
-                    }
-                } else {
-                    all_images_rendered = false;
-                    let is_rendered = match ui.current_page() {
-                        PageState::Playlists { state } => state.rendered,
-                        _ => false,
-                    };
-                    if !is_rendered {
-                        state.client_sender.send(crate::client::ClientRequest::LoadImage(url.clone())).unwrap_or_default();
+                        if is_visible {
+                            entry.1.render(frame, cover_rect);
+                        }
                     }
                 }
             }
@@ -739,13 +792,8 @@ pub fn render_library_page(
         frame,
         chunks[2],
     );
-    let saved_shows_rect = construct_and_render_block(
-        "Saved Shows",
-        &ui.theme,
-        Borders::ALL,
-        frame,
-        chunks[3],
-    );
+    let saved_shows_rect =
+        construct_and_render_block("Saved Shows", &ui.theme, Borders::ALL, frame, chunks[3]);
 
     // 3. Construct the page's widgets
     // Construct the playlist window

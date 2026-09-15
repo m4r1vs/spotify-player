@@ -322,7 +322,8 @@ fn main() -> Result<()> {
             // client channels
             let (client_pub, client_sub) = flume::unbounded::<client::ClientRequest>();
 
-            let state = std::sync::Arc::new(state::State::new(client_pub.clone(), is_daemon, log_buffer));
+            let state =
+                std::sync::Arc::new(state::State::new(client_pub.clone(), is_daemon, log_buffer));
             start_app(&state, client_pub, client_sub)
         }
         Some((cmd, args)) => cli::handle_cli_subcommand(cmd, args),

@@ -37,11 +37,11 @@ impl std::fmt::Debug for ImageRenderInfo {
     }
 }
 
-#[derive(Default)]
 #[cfg(feature = "image")]
 pub struct PlaylistsPageRenderInfo {
     /// Cover images prepared for the currently rendered grid, keyed by image URL.
-    pub covers: std::collections::HashMap<String, (ratatui::layout::Rect, CoverImage)>,
+    pub covers: ttl_cache::TtlCache<String, (ratatui::layout::Rect, CoverImage)>,
+    pub encoding_tasks: std::collections::HashSet<(String, ratatui::layout::Rect)>,
     pub rendered: bool,
     pub start_row: usize,
     pub items_per_row: usize,
@@ -51,10 +51,27 @@ pub struct PlaylistsPageRenderInfo {
 }
 
 #[cfg(feature = "image")]
+impl Default for PlaylistsPageRenderInfo {
+    fn default() -> Self {
+        Self {
+            covers: ttl_cache::TtlCache::new(256),
+            encoding_tasks: std::collections::HashSet::new(),
+            rendered: false,
+            start_row: 0,
+            items_per_row: 0,
+            max_visible_rows: 0,
+            rect: ratatui::layout::Rect::default(),
+            search_query: String::new(),
+        }
+    }
+}
+
+#[cfg(feature = "image")]
 impl std::fmt::Debug for PlaylistsPageRenderInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("PlaylistsPageRenderInfo")
-            .field("covers", &self.covers.len())
+            .field("covers_capacity", &self.covers.capacity())
+            .field("encoding_tasks", &self.encoding_tasks.len())
             .field("rendered", &self.rendered)
             .field("start_row", &self.start_row)
             .field("items_per_row", &self.items_per_row)

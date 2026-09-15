@@ -271,7 +271,9 @@ impl PageState {
             Self::CommandHelp { scroll_offset }
             | Self::Queue { scroll_offset }
             | Self::Logs { scroll_offset } => Some(MutableWindowState::Scroll(scroll_offset)),
-            Self::Playlists { state } => Some(MutableWindowState::Scroll(&mut state.selected_index)),
+            Self::Playlists { state } => {
+                Some(MutableWindowState::Scroll(&mut state.selected_index))
+            }
         }
     }
 }
