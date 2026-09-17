@@ -623,17 +623,56 @@ pub fn render_playlists_page(
             };
 
             let cover_rect = Rect::new(x, y, img_length, available_cover_height);
-            let outer_rect = cover_rect;
-
+            let title_visible = inner_rect.height.saturating_sub(y_offset) > img_width;
+            
             if is_visible && i == selected_index && is_active {
                 let style = ui.theme.selection(true);
-                let highlight_bg = style.bg.unwrap_or(ratatui::style::Color::White);
-                let highlight_block = Block::default()
-                    .style(Style::default().bg(highlight_bg));
-                frame.render_widget(highlight_block, outer_rect);
+                let content_height = if title_visible {
+                    available_cover_height + 1
+                } else {
+                    available_cover_height
+                };
+                
+                let mut border_x = x.saturating_sub(1);
+                let mut border_y = y.saturating_sub(1);
+                let mut border_w = img_length + 2;
+                let mut border_h = content_height + 2;
+                let mut borders = Borders::ALL;
+                
+                if y <= inner_rect.y {
+                    border_y = y;
+                    border_h = content_height + 1;
+                    borders -= Borders::TOP;
+                }
+                if x <= inner_rect.x {
+                    border_x = x;
+                    border_w = img_length + 1;
+                    borders -= Borders::LEFT;
+                }
+                
+                let border_rect = Rect::new(border_x, border_y, border_w, border_h);
+                
+                let custom_border = ratatui::symbols::border::Set {
+                    top_left: " ",
+                    top_right: " ",
+                    bottom_left: " ",
+                    bottom_right: " ",
+                    vertical_left: "🮇",
+                    vertical_right: "▎",
+                    horizontal_top: "▂",
+                    horizontal_bottom: "🮂",
+                };
+                
+                let border_block = Block::default()
+                    .borders(borders)
+                    .border_set(custom_border)
+                    .border_style(Style::default().fg(style.bg.unwrap_or(ratatui::style::Color::White)));
+                
+                // Draw the 1/4 block border around the combined area
+                frame.render_widget(border_block, border_rect);
             }
 
-            if is_visible && inner_rect.height.saturating_sub(y_offset) > img_width {
+            if is_visible && title_visible {
                 let title_rect = Rect::new(x, y + img_width, img_length, 1);
                 let mut style = Style::default();
                 if i == selected_index && is_active {
