@@ -623,6 +623,15 @@ pub fn render_playlists_page(
             };
 
             let cover_rect = Rect::new(x, y, img_length, available_cover_height);
+            let outer_rect = cover_rect;
+
+            if is_visible && i == selected_index && is_active {
+                let style = ui.theme.selection(true);
+                let highlight_bg = style.bg.unwrap_or(ratatui::style::Color::White);
+                let highlight_block = Block::default()
+                    .style(Style::default().bg(highlight_bg));
+                frame.render_widget(highlight_block, outer_rect);
+            }
 
             if is_visible && inner_rect.height.saturating_sub(y_offset) > img_width {
                 let title_rect = Rect::new(x, y + img_width, img_length, 1);
@@ -633,7 +642,7 @@ pub fn render_playlists_page(
 
                 let title = p.name.clone();
                 frame.render_widget(
-                    Paragraph::new(ratatui::text::Span::styled(title, style)),
+                    Paragraph::new(title).style(style),
                     title_rect,
                 );
             }
