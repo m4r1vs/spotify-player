@@ -560,9 +560,52 @@ pub fn render_playlists_page(
 
         // Calculate visible rows
         let max_visible_rows = (inner_rect.height / item_height) as usize;
-        let selected_row = selected_index / items_per_row;
 
-        let start_row = (selected_row / max_visible_rows) * max_visible_rows;
+        let mut scroll_offset = 0.0;
+        let mut should_re_render = false;
+
+        if let PageState::Playlists { state } = ui.current_page_mut() {
+            let max_scroll = ((flat_playlists.len().saturating_sub(1) / items_per_row) as f64 * item_height as f64).max(0.0);
+            
+            // Snap target if selected_index is completely out of view and we're not actively animating a manual scroll
+            let selected_row = state.selected_index / items_per_row;
+            let selected_y = selected_row as f64 * item_height as f64;
+            
+            if (state.scroll_offset - state.target_scroll_offset).abs() < 0.1 {
+                if selected_y < state.target_scroll_offset {
+                    state.target_scroll_offset = selected_y;
+                } else if selected_y + item_height as f64 > state.target_scroll_offset + inner_rect.height as f64 {
+                    state.target_scroll_offset = selected_y + item_height as f64 - inner_rect.height as f64;
+                }
+            }
+
+            state.target_scroll_offset = state.target_scroll_offset.clamp(0.0, max_scroll);
+
+            if (state.scroll_offset - state.target_scroll_offset).abs() > 0.1 {
+                let diff = state.target_scroll_offset - state.scroll_offset;
+                let step = (diff.abs() * 0.3 * state.scroll_speed).max(state.scroll_speed).min(diff.abs());
+                state.scroll_offset += diff.signum() * step;
+                should_re_render = true;
+                state.rendered = false;
+            } else {
+                state.scroll_offset = state.target_scroll_offset;
+            }
+            
+            scroll_offset = state.scroll_offset;
+            
+            // Update highlight if it goes out of view due to scrolling
+            let selected_y_offset = selected_y - scroll_offset;
+            if selected_y_offset + (img_width as f64) < 0.0 {
+                state.selected_index = std::cmp::min(state.selected_index + items_per_row, flat_playlists.len().saturating_sub(1));
+            } else if selected_y_offset >= inner_rect.height as f64 {
+                state.selected_index = state.selected_index.saturating_sub(items_per_row);
+            }
+        }
+        
+        let selected_index = match ui.current_page() {
+            PageState::Playlists { state } => state.selected_index,
+            _ => 0,
+        };
 
         let search_query = match ui.popup {
             Some(PopupState::Search { ref query }) => query.clone(),
@@ -571,13 +614,11 @@ pub fn render_playlists_page(
 
         let view_changed = (
             inner_rect,
-            start_row,
             items_per_row,
             max_visible_rows,
             &search_query,
         ) != (
             ui.last_playlists_page_render_info.rect,
-            ui.last_playlists_page_render_info.start_row,
             ui.last_playlists_page_render_info.items_per_row,
             ui.last_playlists_page_render_info.max_visible_rows,
             &ui.last_playlists_page_render_info.search_query,
@@ -585,7 +626,6 @@ pub fn render_playlists_page(
 
         if view_changed {
             ui.last_playlists_page_render_info.rect = inner_rect;
-            ui.last_playlists_page_render_info.start_row = start_row;
             ui.last_playlists_page_render_info.items_per_row = items_per_row;
             ui.last_playlists_page_render_info.max_visible_rows = max_visible_rows;
             ui.last_playlists_page_render_info.search_query = search_query;
@@ -594,36 +634,42 @@ pub fn render_playlists_page(
             }
         }
 
-        let mut all_images_rendered = true;
+        let mut all_images_rendered = !should_re_render;
         let content_width = (items_per_row as u16).saturating_sub(1) * item_width + img_length;
         let left_margin = inner_rect.width.saturating_sub(content_width) / 2;
+
+        let start_row = (scroll_offset / item_height as f64).floor() as usize;
 
         for (i, p) in flat_playlists.iter().enumerate() {
             let row = i / items_per_row;
             let col = i % items_per_row;
 
-            if row < start_row || row >= start_row + 3 * max_visible_rows {
+            if row < start_row.saturating_sub(3) || row >= start_row + max_visible_rows + 5 {
                 continue;
             }
 
-            let y_offset = (row.saturating_sub(start_row)) as u16 * item_height;
-            let is_visible = y_offset < inner_rect.height;
-
+            let y_offset_f = (row as f64 * item_height as f64) - scroll_offset;
+            let is_visible = y_offset_f > -(item_height as f64) && y_offset_f < inner_rect.height as f64;
+            
+            let y_offset = y_offset_f.max(0.0) as u16;
+            
             let x = inner_rect.x + left_margin + (col as u16 * item_width);
-            let y = if is_visible {
-                inner_rect.y + y_offset
-            } else {
-                inner_rect.y
-            };
+            let y = inner_rect.y + y_offset;
 
-            let available_cover_height = if is_visible {
-                inner_rect.height.saturating_sub(y_offset).min(img_width)
-            } else {
+            // if y_offset_f is negative, the cover is partially hidden at the top
+            let top_hidden = if y_offset_f < 0.0 { -y_offset_f as u16 } else { 0 };
+            
+            // available cover height taking into account both top hidden and bottom hidden
+            let available_cover_height = if !is_visible {
                 img_width
+            } else if y_offset_f < 0.0 {
+                img_width.saturating_sub(top_hidden).min(inner_rect.height)
+            } else {
+                inner_rect.height.saturating_sub(y_offset).min(img_width)
             };
 
             let cover_rect = Rect::new(x, y, img_length, available_cover_height);
-            let title_visible = inner_rect.height.saturating_sub(y_offset) > img_width;
+            let title_visible = y_offset_f + (img_width as f64) < inner_rect.height as f64;
             
             if is_visible && i == selected_index && is_active {
                 let style = ui.theme.selection(true);
@@ -693,25 +739,33 @@ pub fn render_playlists_page(
             }
 
             if let Some(url) = &p.cover_url {
+                let is_top_cropped = y_offset_f < 0.0;
+                let target_rect = if is_top_cropped { cover_rect } else { Rect::new(0, 0, img_length, img_width) };
+                
+                let cache_key = if is_top_cropped {
+                    format!("{}_{}x{}", url, target_rect.width, target_rect.height)
+                } else {
+                    url.clone()
+                };
+                
                 let needs_encode = !ui
                     .last_playlists_page_render_info
                     .covers
-                    .get(url)
-                    .is_some_and(|(area, _)| {
-                        area.width == cover_rect.width && area.height == cover_rect.height
-                    });
-
-                let encode_success = !needs_encode;
+                    .contains_key(&cache_key);
 
                 if needs_encode {
                     let image_exists = state.data.read().caches.images.contains_key(url);
                     
                     if image_exists {
                         all_images_rendered = false;
-                        if ui.last_playlists_page_render_info.encoding_tasks.insert((url.clone(), cover_rect)) {
+                        
+                        // Asynchronous encode
+                        if ui.last_playlists_page_render_info.encoding_tasks.insert((url.clone(), target_rect)) {
                             let state_clone = state.clone();
                             let url_clone = url.clone();
+                            let cache_key_clone = cache_key.clone();
                             let picker = ui.picker.clone();
+                            let img_width_clone = img_width;
                             
                             std::thread::spawn(move || {
                                 let image = {
@@ -719,35 +773,28 @@ pub fn render_playlists_page(
                                     data.caches.images.get(&url_clone).cloned()
                                 };
                                 
-                                if let Some(mut image) = image {
-                                    if available_cover_height < img_width {
+                                if let Some(mut img) = image {
+                                    if target_rect.height < img_width_clone {
                                         use image::GenericImageView;
-                                        let (w, h) = image.dimensions();
-                                        let crop_h = (h as f32
-                                            * (f32::from(available_cover_height) / f32::from(img_width)))
-                                        .round() as u32;
-                                        image = image.crop_imm(0, 0, w, crop_h);
+                                        let (w, h) = img.dimensions();
+                                        let crop_h = (h as f32 * (f32::from(target_rect.height) / f32::from(img_width_clone))).round() as u32;
+                                        img = img.crop_imm(0, h.saturating_sub(crop_h), w, crop_h);
                                     }
                                     
-                                    let result = super::cover_image::CoverImage::new(&picker, &image, cover_rect);
+                                    let result = super::cover_image::CoverImage::new(&picker, &img, target_rect);
                                     
                                     let mut ui = state_clone.ui.lock();
-                                    ui.last_playlists_page_render_info.encoding_tasks.remove(&(url_clone.clone(), cover_rect));
-                                    match result {
-                                        Ok(cover) => {
-                                            ui.last_playlists_page_render_info.covers.insert(
-                                                url_clone,
-                                                (cover_rect, cover),
-                                                *crate::state::TTL_CACHE_DURATION,
-                                            );
-                                        }
-                                        Err(err) => {
-                                            tracing::error!("Failed to encode playlist cover image: {err:#}");
-                                        }
+                                    ui.last_playlists_page_render_info.encoding_tasks.remove(&(url_clone.clone(), target_rect));
+                                    if let Ok(cover) = result {
+                                        ui.last_playlists_page_render_info.covers.insert(
+                                            cache_key_clone,
+                                            (target_rect, cover),
+                                            *crate::state::TTL_CACHE_DURATION,
+                                        );
                                     }
                                 } else {
                                     let mut ui = state_clone.ui.lock();
-                                    ui.last_playlists_page_render_info.encoding_tasks.remove(&(url_clone, cover_rect));
+                                    ui.last_playlists_page_render_info.encoding_tasks.remove(&(url_clone, target_rect));
                                 }
                             });
                         }
@@ -763,10 +810,12 @@ pub fn render_playlists_page(
                     }
                 }
 
-                if encode_success {
-                    if let Some(entry) = ui.last_playlists_page_render_info.covers.get_mut(url) {
-                        entry.0 = cover_rect;
-                        if is_visible {
+                if is_visible {
+                    if let Some(entry) = ui.last_playlists_page_render_info.covers.get_mut(&cache_key) {
+                        entry.1.render(frame, cover_rect);
+                    } else if is_top_cropped {
+                        // Fallback to the full image while the cropped one is being encoded
+                        if let Some(entry) = ui.last_playlists_page_render_info.covers.get_mut(url) {
                             entry.1.render(frame, cover_rect);
                         }
                     }
