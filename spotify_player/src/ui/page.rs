@@ -663,10 +663,16 @@ pub fn render_playlists_page(
                     horizontal_bottom: "🮂",
                 };
                 
+                let border_fg = if style.add_modifier.contains(ratatui::style::Modifier::REVERSED) {
+                    style.fg.unwrap_or(ratatui::style::Color::Reset)
+                } else {
+                    style.bg.unwrap_or(ratatui::style::Color::Reset)
+                };
+
                 let border_block = Block::default()
                     .borders(borders)
                     .border_set(custom_border)
-                    .border_style(Style::default().fg(style.bg.unwrap_or(ratatui::style::Color::White)));
+                    .border_style(Style::default().fg(border_fg));
                 
                 // Draw the 1/4 block border around the combined area
                 frame.render_widget(border_block, border_rect);
