@@ -22,7 +22,7 @@ librespot-metadata = { version = "0.8.0" }
 log = "0.4.34"
 chrono = "0.4.45"
 chrono-humanize = "0.2.3"
-reqwest = { version = "0.12.28", features = ["json", "blocking"] }
+reqwest = { version = "0.12.28", default-features = false, features = ["charset", "http2", "system-proxy", "json", "blocking"] }
 reqwest-middleware = "0.4.2"
 rspotify = {version = "0.16.1", features = ["cli", "reqwest-middleware"] }
 http = "1.5.0"
@@ -107,7 +107,15 @@ notify = ["notify-rust"]
 daemon = ["daemonize", "streaming"]
 fzf = ["fuzzy-matcher"]
 
-default = ["rodio-backend", "media-control"]
+# TLS backend used by the application's HTTP client (auth/token exchange).
+# `rustls-tls` keeps reqwest's default backend (rustls + rustls-platform-verifier).
+# `native-tls` uses the system TLS library (e.g. openssl) instead — needed on
+# platforms where rustls-platform-verifier cannot run, such as Termux (Android
+# target without a JVM, see rustls/rustls-platform-verifier#219).
+rustls-tls = ["reqwest/default-tls"]
+native-tls = ["reqwest/native-tls"]
+
+default = ["rodio-backend", "media-control", "rustls-tls"]
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }{ archive-suffix }"
