@@ -289,6 +289,22 @@ impl Default for KeymapConfig {
                     command: Command::SelectLastOrScrollToBottom,
                 },
                 Keymap {
+                    key_sequence: "C-y".into(),
+                    command: Command::ScrollUp,
+                },
+                Keymap {
+                    key_sequence: "C-e".into(),
+                    command: Command::ScrollDown,
+                },
+                Keymap {
+                    key_sequence: "]".into(),
+                    command: Command::IncreaseAnimationSpeed,
+                },
+                Keymap {
+                    key_sequence: "[".into(),
+                    command: Command::DecreaseAnimationSpeed,
+                },
+                Keymap {
                     key_sequence: "s t".into(),
                     command: Command::SortTrackByTitle,
                 },

@@ -38,6 +38,11 @@ pub enum Command {
     SelectFirstOrScrollToTop,
     SelectLastOrScrollToBottom,
 
+    ScrollDown,
+    ScrollUp,
+    IncreaseAnimationSpeed,
+    DecreaseAnimationSpeed,
+
     JumpToCurrentTrackInContext,
     QuickPlay,
     ChooseSelected,
@@ -335,6 +340,10 @@ impl Command {
             Self::SelectLastOrScrollToBottom => {
                 "select the last item in a list/table or scroll to the bottom"
             }
+            Self::ScrollDown => "scroll down smoothly line-by-line",
+            Self::ScrollUp => "scroll up smoothly line-by-line",
+            Self::IncreaseAnimationSpeed => "increase the animation speed for smooth scrolling",
+            Self::DecreaseAnimationSpeed => "decrease the animation speed for smooth scrolling",
             Self::ChooseSelected => "choose the selected item and act on it",
             Self::QuickPlay => "play the selected item",
             Self::JumpToCurrentTrackInContext => "jump to the current track in the context",
