@@ -73,7 +73,7 @@ impl CoverImage {
     /// Render the cover image into `area`.
     pub fn render(&mut self, frame: &mut Frame, area: Rect) {
         match self {
-            Self::Widget(protocol) => frame.render_widget(Image::new(protocol.as_ref()), area),
+            Self::Widget(protocol) => frame.render_widget(Image::new(protocol.as_ref()).allow_clipping(true), area),
             Self::Iterm2 {
                 escape,
                 drawn,
