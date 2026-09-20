@@ -370,29 +370,48 @@ fn handle_key_sequence_for_search_popup(
     ui: &mut UIStateGuard,
 ) -> Result<bool> {
     // handle user's input that updates the search query
-    let Some(PopupState::Search { ref mut query }) = &mut ui.popup else {
+    let Some(PopupState::Search { ref mut query, ref mut input_focused }) = &mut ui.popup else {
         return Ok(false);
     };
-    if key_sequence.keys.len() == 1 {
-        if let Key::None(c) = key_sequence.keys[0] {
-            match c {
-                crossterm::event::KeyCode::Char(c) => {
-                    query.push(c);
-                    ui.current_page_mut().select(0);
-                    return Ok(true);
-                }
-                crossterm::event::KeyCode::Backspace => {
-                    if query.is_empty() {
-                        // close search popup when user presses backspace on empty search
-                        ui.popup = None;
-                    } else {
-                        query.pop().unwrap();
+
+    if *input_focused {
+        if key_sequence.keys.len() == 1 {
+            if let Key::None(c) = key_sequence.keys[0] {
+                match c {
+                    crossterm::event::KeyCode::Char(c) => {
+                        query.push(c);
                         ui.current_page_mut().select(0);
+                        return Ok(true);
                     }
-                    return Ok(true);
+                    crossterm::event::KeyCode::Backspace => {
+                        if query.is_empty() {
+                            // unfocus search popup when user presses backspace on empty search
+                            *input_focused = false;
+                        } else {
+                            query.pop().unwrap();
+                            ui.current_page_mut().select(0);
+                        }
+                        return Ok(true);
+                    }
+                    _ => {}
                 }
-                _ => {}
             }
+        }
+        
+        if let Some(Command::ClosePopup) = config::get_config()
+            .keymap_config
+            .find_command_from_key_sequence(key_sequence)
+        {
+            *input_focused = false;
+            return Ok(true);
+        }
+    } else {
+        if let Some(Command::ClosePopup) = config::get_config()
+            .keymap_config
+            .find_command_from_key_sequence(key_sequence)
+        {
+            ui.popup = None;
+            return Ok(true);
         }
     }
 

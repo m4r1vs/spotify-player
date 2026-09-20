@@ -608,7 +608,7 @@ pub fn render_playlists_page(
         };
 
         let search_query = match ui.popup {
-            Some(PopupState::Search { ref query }) => query.clone(),
+            Some(PopupState::Search { ref query, .. }) => query.clone(),
             _ => String::new(),
         };
 
