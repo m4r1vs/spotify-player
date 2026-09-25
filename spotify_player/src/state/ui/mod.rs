@@ -48,6 +48,8 @@ pub struct PlaylistsPageRenderInfo {
     pub max_visible_rows: usize,
     pub rect: ratatui::layout::Rect,
     pub search_query: String,
+    /// Cached cell width/height ratio; reset whenever the terminal is resized.
+    pub font_ratio: Option<f32>,
 }
 
 #[cfg(feature = "image")]
@@ -62,6 +64,7 @@ impl Default for PlaylistsPageRenderInfo {
             max_visible_rows: 0,
             rect: ratatui::layout::Rect::default(),
             search_query: String::new(),
+            font_ratio: None,
         }
     }
 }
@@ -78,6 +81,7 @@ impl std::fmt::Debug for PlaylistsPageRenderInfo {
             .field("max_visible_rows", &self.max_visible_rows)
             .field("rect", &self.rect)
             .field("search_query", &self.search_query)
+            .field("font_ratio", &self.font_ratio)
             .finish()
     }
 }

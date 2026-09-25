@@ -496,25 +496,11 @@ pub fn render_playlists_page(
         frame.render_widget(block, rect);
 
         let (img_width, img_length, item_width, item_height, items_per_row) = {
-            let font_ratio = {
-                let mut ratio = 0.5;
-                if let Ok(size) = crossterm::terminal::window_size() {
-                    if size.width > 0 && size.height > 0 && size.columns > 0 && size.rows > 0 {
-                        let font_width = f32::from(size.width) / f32::from(size.columns);
-                        let font_height = f32::from(size.height) / f32::from(size.rows);
-                        ratio = font_width / font_height;
-                    } else {
-                        let font_size = ui.picker.font_size();
-                        if font_size.width > 0 && font_size.height > 0 {
-                            ratio = f32::from(font_size.width) / f32::from(font_size.height);
-                        }
-                    }
-                } else {
-                    let font_size = ui.picker.font_size();
-                    if font_size.width > 0 && font_size.height > 0 {
-                        ratio = f32::from(font_size.width) / f32::from(font_size.height);
-                    }
-                }
+            let font_ratio = if let Some(ratio) = ui.last_playlists_page_render_info.font_ratio {
+                ratio
+            } else {
+                let ratio = super::utils::font_ratio(&ui.picker);
+                ui.last_playlists_page_render_info.font_ratio = Some(ratio);
                 ratio
             };
 

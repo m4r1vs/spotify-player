@@ -33,6 +33,8 @@ pub mod single_line_input;
 #[cfg(feature = "streaming")]
 pub mod streaming;
 pub mod utils;
+#[cfg(all(test, feature = "image"))]
+mod visual_test;
 
 /// Run the application UI
 pub fn run(state: &SharedState, mut terminal: Terminal) -> Result<()> {
@@ -61,6 +63,7 @@ pub fn run(state: &SharedState, mut terminal: Terminal) -> Result<()> {
                     // redraw the cover image when the terminal's size or overlay state changes
                     ui.last_cover_image_render_info = ImageRenderInfo::default();
                     ui.last_playlists_page_render_info.covers.clear();
+                    ui.last_playlists_page_render_info.font_ratio = None;
                     if let PageState::Playlists { state } = ui.current_page_mut() {
                         state.rendered = false;
                     }

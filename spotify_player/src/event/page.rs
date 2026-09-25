@@ -736,69 +736,64 @@ fn handle_command_for_playlists_page(
     #[cfg(feature = "image")]
     {
         let items_per_row = ui.last_playlists_page_render_info.items_per_row;
-        let offset = count_prefix.unwrap_or(1);
-        let item_height = (ui.last_playlists_page_render_info.rect.width / items_per_row as u16).saturating_sub(2) as f32;
-        let font_ratio = {
-            let mut ratio = 0.5;
-            if let Ok(size) = crossterm::terminal::window_size() {
-                if size.width > 0 && size.height > 0 && size.columns > 0 && size.rows > 0 {
-                    let font_width = f32::from(size.width) / f32::from(size.columns);
-                    let font_height = f32::from(size.height) / f32::from(size.rows);
-                    ratio = font_width / font_height;
-                }
-            }
-            ratio
-        };
-        let img_width = (item_height * font_ratio).round() as u16;
-        let item_height = img_width + 2;
+        // before the first render there is no grid yet, so fall back to plain list navigation
+        if items_per_row > 0 {
+            let offset = count_prefix.unwrap_or(1);
+            let item_height = (ui.last_playlists_page_render_info.rect.width / items_per_row as u16)
+                .saturating_sub(2) as f32;
+            let font_ratio = ui.last_playlists_page_render_info.font_ratio.unwrap_or(0.5);
+            let img_width = (item_height * font_ratio).round() as u16;
+            let item_height = img_width + 2;
 
-        match command {
-            Command::ScrollDown => {
-                if let PageState::Playlists { state } = ui.current_page_mut() {
-                    state.target_scroll_offset += item_height as f64;
+            match command {
+                Command::ScrollDown => {
+                    if let PageState::Playlists { state } = ui.current_page_mut() {
+                        state.target_scroll_offset += item_height as f64;
+                    }
+                    return true;
                 }
-                return true;
-            }
-            Command::ScrollUp => {
-                if let PageState::Playlists { state } = ui.current_page_mut() {
-                    state.target_scroll_offset = (state.target_scroll_offset - item_height as f64).max(0.0);
+                Command::ScrollUp => {
+                    if let PageState::Playlists { state } = ui.current_page_mut() {
+                        state.target_scroll_offset =
+                            (state.target_scroll_offset - item_height as f64).max(0.0);
+                    }
+                    return true;
                 }
-                return true;
-            }
-            Command::IncreaseAnimationSpeed => {
-                if let PageState::Playlists { state } = ui.current_page_mut() {
-                    state.scroll_speed *= 1.5;
+                Command::IncreaseAnimationSpeed => {
+                    if let PageState::Playlists { state } = ui.current_page_mut() {
+                        state.scroll_speed *= 1.5;
+                    }
+                    return true;
                 }
-                return true;
-            }
-            Command::DecreaseAnimationSpeed => {
-                if let PageState::Playlists { state } = ui.current_page_mut() {
-                    state.scroll_speed /= 1.5;
+                Command::DecreaseAnimationSpeed => {
+                    if let PageState::Playlists { state } = ui.current_page_mut() {
+                        state.scroll_speed /= 1.5;
+                    }
+                    return true;
                 }
-                return true;
+                Command::SelectNextOrScrollDown => {
+                    let new_index =
+                        std::cmp::min(selected_index + offset * items_per_row, n_playlists - 1);
+                    ui.current_page_mut().select(new_index);
+                    return true;
+                }
+                Command::SelectPreviousOrScrollUp => {
+                    let new_index = selected_index.saturating_sub(offset * items_per_row);
+                    ui.current_page_mut().select(new_index);
+                    return true;
+                }
+                Command::FocusNextWindow => {
+                    let new_index = std::cmp::min(selected_index + offset, n_playlists - 1);
+                    ui.current_page_mut().select(new_index);
+                    return true;
+                }
+                Command::FocusPreviousWindow => {
+                    let new_index = selected_index.saturating_sub(offset);
+                    ui.current_page_mut().select(new_index);
+                    return true;
+                }
+                _ => {}
             }
-            Command::SelectNextOrScrollDown => {
-                let new_index =
-                    std::cmp::min(selected_index + offset * items_per_row, n_playlists - 1);
-                ui.current_page_mut().select(new_index);
-                return true;
-            }
-            Command::SelectPreviousOrScrollUp => {
-                let new_index = selected_index.saturating_sub(offset * items_per_row);
-                ui.current_page_mut().select(new_index);
-                return true;
-            }
-            Command::FocusNextWindow => {
-                let new_index = std::cmp::min(selected_index + offset, n_playlists - 1);
-                ui.current_page_mut().select(new_index);
-                return true;
-            }
-            Command::FocusPreviousWindow => {
-                let new_index = selected_index.saturating_sub(offset);
-                ui.current_page_mut().select(new_index);
-                return true;
-            }
-            _ => {}
         }
     }
 

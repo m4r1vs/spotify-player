@@ -78,6 +78,25 @@ pub fn clear_area(frame: &mut Frame, rect: Rect, theme: &config::Theme) {
     let _ = stdout.flush();
 }
 
+/// Width / height ratio of a terminal cell, from the terminal's pixel size if it reports one and
+/// the picker's queried font size otherwise. Opens `/dev/tty`, so callers should cache the result.
+#[cfg(feature = "image")]
+pub fn font_ratio(picker: &ratatui_image::picker::Picker) -> f32 {
+    if let Ok(size) = crossterm::terminal::window_size() {
+        if size.width > 0 && size.height > 0 && size.columns > 0 && size.rows > 0 {
+            let font_width = f32::from(size.width) / f32::from(size.columns);
+            let font_height = f32::from(size.height) / f32::from(size.rows);
+            return font_width / font_height;
+        }
+    }
+    let font_size = picker.font_size();
+    if font_size.width > 0 && font_size.height > 0 {
+        f32::from(font_size.width) / f32::from(font_size.height)
+    } else {
+        0.5
+    }
+}
+
 /// Construct a generic list widget
 pub fn construct_list_widget<'a>(
     theme: &config::Theme,
