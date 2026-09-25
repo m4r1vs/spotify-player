@@ -44,8 +44,8 @@ fn init_config() {
         std::env::set_var("TERM", "xterm-256color");
         std::env::set_var("TERM_PROGRAM", "ghostty");
 
-        let dir =
-            std::env::temp_dir().join(format!("spotify-player-visual-test-{}", std::process::id()));
+        // a fixed location, so repeated runs reuse it instead of piling up temp dirs
+        let dir = output_dir().join("fixture");
         let config_dir = dir.join("config");
         let cache_dir = dir.join("cache");
         std::fs::create_dir_all(&config_dir).unwrap();
@@ -601,53 +601,4 @@ fn playlists_page_requests_missing_images_once() {
         urls.len(),
         "some images were requested repeatedly"
     );
-}
-
-/// Renders the real library from the local spotify_player cache, for eyeballing only.
-#[test]
-#[ignore = "needs a local spotify_player cache"]
-fn playlists_page_real_library() {
-    let cache = dirs_next::home_dir().unwrap().join(".cache/spotify-player");
-    let playlists: Vec<PlaylistFolderItem> = serde_json::from_reader(std::io::BufReader::new(
-        std::fs::File::open(cache.join("Playlists_cache.json")).unwrap(),
-    ))
-    .unwrap();
-
-    let mut h = Harness::new(ProtocolType::Halfblocks, WIDE, 0, |_| false);
-    {
-        let mut data = h.state.data.write();
-        for item in playlists.iter().take(60) {
-            if let PlaylistFolderItem::Playlist(Playlist {
-                cover_url: Some(url),
-                ..
-            }) = item
-            {
-                let path = cache.join("image").join(url.replace('/', ""));
-                if let Ok(img) = std::fs::read(path)
-                    .map_err(anyhow::Error::from)
-                    .and_then(|b| image::load_from_memory(&b).map_err(anyhow::Error::from))
-                {
-                    data.caches
-                        .images
-                        .insert(url.clone(), img, *TTL_CACHE_DURATION);
-                }
-            }
-        }
-        data.user_data.playlists = playlists;
-    }
-    let out_dir = output_dir();
-    std::fs::create_dir_all(&out_dir).unwrap();
-    for (name, rows) in [("real_library_top", 0.0), ("real_library_scrolled", 1.3)] {
-        h.draw();
-        let offset = (rows * h.item_height()).round();
-        h.page_state(|p| {
-            p.scroll_offset = offset;
-            p.target_scroll_offset = offset;
-            p.selected_index = 12;
-        });
-        let buf = h.settle().pop().unwrap();
-        raster::rasterize(&buf)
-            .save(out_dir.join(format!("{name}.png")))
-            .unwrap();
-    }
 }
