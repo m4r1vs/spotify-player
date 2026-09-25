@@ -11,12 +11,23 @@
     flake-utils,
     ...
   }:
-    flake-utils.lib.eachDefaultSystem (
+    {
+      # Builds against the consumer's nixpkgs; tweak features with
+      # `spotify-player.override { withAudioBackend = "pulseaudio"; ... }`.
+      overlays.default = final: _prev: {
+        spotify-player = final.callPackage ./default.nix {};
+      };
+    }
+    // flake-utils.lib.eachDefaultSystem (
       system: let
         pkgs = import nixpkgs {inherit system;};
+        spotify-player = pkgs.callPackage ./default.nix {};
       in {
-        defaultPackage = pkgs.callPackage ./default.nix {};
-        devShell = with pkgs;
+        packages = {
+          inherit spotify-player;
+          default = spotify-player;
+        };
+        devShells.default = with pkgs;
           mkShell {
             nativeBuildInputs = [
               pkg-config
