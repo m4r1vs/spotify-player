@@ -370,7 +370,11 @@ fn handle_key_sequence_for_search_popup(
     ui: &mut UIStateGuard,
 ) -> Result<bool> {
     // handle user's input that updates the search query
-    let Some(PopupState::Search { ref mut query, ref mut input_focused }) = &mut ui.popup else {
+    let Some(PopupState::Search {
+        ref mut query,
+        ref mut input_focused,
+    }) = &mut ui.popup
+    else {
         return Ok(false);
     };
 
@@ -397,7 +401,7 @@ fn handle_key_sequence_for_search_popup(
                 }
             }
         }
-        
+
         if let Some(Command::ClosePopup) = config::get_config()
             .keymap_config
             .find_command_from_key_sequence(key_sequence)
@@ -405,14 +409,12 @@ fn handle_key_sequence_for_search_popup(
             *input_focused = false;
             return Ok(true);
         }
-    } else {
-        if let Some(Command::ClosePopup) = config::get_config()
-            .keymap_config
-            .find_command_from_key_sequence(key_sequence)
-        {
-            ui.popup = None;
-            return Ok(true);
-        }
+    } else if let Some(Command::ClosePopup) = config::get_config()
+        .keymap_config
+        .find_command_from_key_sequence(key_sequence)
+    {
+        ui.popup = None;
+        return Ok(true);
     }
 
     // key sequence not handle by the popup should be moved to the current page's event handler

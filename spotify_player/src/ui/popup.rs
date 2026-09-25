@@ -62,11 +62,18 @@ pub fn render_popup(
                 );
                 (chunks[0], true)
             }
-            PopupState::Search { query, input_focused } => {
+            PopupState::Search {
+                query,
+                input_focused,
+            } => {
                 let chunks =
                     Layout::vertical([Constraint::Fill(0), Constraint::Length(3)]).split(rect);
 
-                let title = if *input_focused { "Search (Focused)" } else { "Search" };
+                let title = if *input_focused {
+                    "Search (Focused)"
+                } else {
+                    "Search"
+                };
                 let rect =
                     construct_and_render_block(title, &ui.theme, Borders::ALL, frame, chunks[1]);
 

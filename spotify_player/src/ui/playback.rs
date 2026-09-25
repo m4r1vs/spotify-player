@@ -93,8 +93,10 @@ pub fn render_playback_window(
                     };
                     if let Some(url) = url {
                         let needs_encode = ui.last_cover_image_render_info.url != url
-                            || ui.last_cover_image_render_info.render_area.width != cover_img_rect.width
-                            || ui.last_cover_image_render_info.render_area.height != cover_img_rect.height
+                            || ui.last_cover_image_render_info.render_area.width
+                                != cover_img_rect.width
+                            || ui.last_cover_image_render_info.render_area.height
+                                != cover_img_rect.height
                             || ui.last_cover_image_render_info.state.is_none();
 
                         if needs_encode {
@@ -122,7 +124,10 @@ pub fn render_playback_window(
                                     render_area: cover_img_rect,
                                     state: None,
                                 };
-                                state.client_sender.send(crate::client::ClientRequest::LoadImage(url.clone())).unwrap_or_default();
+                                state
+                                    .client_sender
+                                    .send(crate::client::ClientRequest::LoadImage(url.clone()))
+                                    .unwrap_or_default();
                             }
                         }
 
