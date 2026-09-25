@@ -31,6 +31,8 @@ This file guides coding agents when working in this repository.
 | `ui/mod.rs`                   | ratatui render loop; main layout dispatch                                   |
 | `ui/{page,playback,popup}.rs` | Render functions for pages, playback bar, popups                            |
 | `ui/streaming.rs`             | FFT audio visualizer: `VisualizationSink`, `VisBands`, bar chart            |
+| `ui/playlist_covers.rs`       | Playlists page grid layout + cover store: encode once, render sliced rows   |
+| `ui/visual_test/`             | Playlists page visual regression tests (goldens, rasterizer, scroll bench)  |
 | `streaming.rs`                | librespot connection + audio backend setup (feature-gated)                  |
 | `cli/`                        | Unix socket server and client for inter-process CLI commands                |
 | `auth.rs`                     | OAuth scopes and librespot credential/session building                      |
@@ -75,6 +77,10 @@ cargo test --no-default-features --features rodio-backend,media-control,image,no
 cargo clippy --no-default-features --features rodio-backend,media-control,image,notify,fzf -- -D warnings
 cargo clippy --no-default-features -- -D warnings   # core paths, no features
 ```
+
+The Playlists page has visual regression tests (`ui/visual_test/`): halfblocks renders are compared
+as PNGs, Kitty renders as placeholder snapshots. Review `target/visual/**/*.compare.png` after a
+failure and re-capture intended changes with `SPOTIFY_PLAYER_UPDATE_GOLDENS=1`.
 
 When fixing no-feature clippy warnings, you may need `#[allow(dead_code)]` / `#[allow(unused_variables)]` on items only used in feature-gated paths. If you touch `daemon`/`streaming` code, add `daemon` to the feature list above to lint those paths too.
 

@@ -78,7 +78,6 @@ pub struct SearchPageUIState {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaylistsPageUIState {
     pub selected_index: usize,
-    pub rendered: bool,
     pub scroll_offset: f64,
     pub target_scroll_offset: f64,
     pub scroll_speed: f64,
@@ -88,7 +87,6 @@ impl PlaylistsPageUIState {
     pub fn new() -> Self {
         Self {
             selected_index: 0,
-            rendered: false,
             scroll_offset: 0.0,
             target_scroll_offset: 0.0,
             scroll_speed: 1.0,
@@ -189,9 +187,6 @@ impl PageState {
     pub fn select(&mut self, id: usize) {
         if let Some(mut state) = self.focus_window_state_mut() {
             state.select(id);
-        }
-        if let Self::Playlists { state } = self {
-            state.rendered = false;
         }
     }
 

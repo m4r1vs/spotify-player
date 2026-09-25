@@ -28,6 +28,8 @@ type Terminal = ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::St
 pub mod cover_image;
 mod page;
 mod playback;
+#[cfg(feature = "image")]
+pub mod playlist_covers;
 mod popup;
 pub mod single_line_input;
 #[cfg(feature = "streaming")]
@@ -55,17 +57,18 @@ pub fn run(state: &SharedState, mut terminal: Terminal) -> Result<()> {
             let terminal_size = terminal.size()?;
             let overlay_state = ui.popup.is_some() || !ui.input_key_sequence.keys.is_empty();
 
-            if Some(terminal_size) != last_terminal_size || overlay_state != last_overlay_state {
+            let resized = Some(terminal_size) != last_terminal_size;
+            if resized || overlay_state != last_overlay_state {
                 last_terminal_size = Some(terminal_size);
                 last_overlay_state = overlay_state;
                 #[cfg(feature = "image")]
                 {
                     // redraw the cover image when the terminal's size or overlay state changes
                     ui.last_cover_image_render_info = ImageRenderInfo::default();
-                    ui.last_playlists_page_render_info.covers.clear();
-                    ui.last_playlists_page_render_info.font_ratio = None;
-                    if let PageState::Playlists { state } = ui.current_page_mut() {
-                        state.rendered = false;
+                    // popups only shrink the Playlists page, so its covers survive overlay changes
+                    if resized {
+                        ui.last_playlists_page_render_info.covers.clear();
+                        ui.last_playlists_page_render_info.font_ratio = None;
                     }
                 }
             }
@@ -184,13 +187,6 @@ fn render_main_layout(
     rect: Rect,
 ) {
     let page_type = ui.current_page().page_type();
-
-    #[cfg(feature = "image")]
-    {
-        if page_type != PageType::Playlists {
-            ui.last_playlists_page_render_info.rendered = false;
-        }
-    }
 
     match page_type {
         PageType::Library => page::render_library_page(is_active, frame, state, ui, rect),

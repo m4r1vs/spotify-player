@@ -735,27 +735,23 @@ fn handle_command_for_playlists_page(
 
     #[cfg(feature = "image")]
     {
-        let items_per_row = ui.last_playlists_page_render_info.items_per_row;
         // before the first render there is no grid yet, so fall back to plain list navigation
-        if items_per_row > 0 {
+        if let Some(layout) = ui.last_playlists_page_render_info.layout {
+            let items_per_row = layout.items_per_row;
             let offset = count_prefix.unwrap_or(1);
-            let item_height = (ui.last_playlists_page_render_info.rect.width / items_per_row as u16)
-                .saturating_sub(2) as f32;
-            let font_ratio = ui.last_playlists_page_render_info.font_ratio.unwrap_or(0.5);
-            let img_width = (item_height * font_ratio).round() as u16;
-            let item_height = img_width + 2;
+            let item_height = f64::from(layout.item_height);
 
             match command {
                 Command::ScrollDown => {
                     if let PageState::Playlists { state } = ui.current_page_mut() {
-                        state.target_scroll_offset += item_height as f64;
+                        state.target_scroll_offset += item_height;
                     }
                     return true;
                 }
                 Command::ScrollUp => {
                     if let PageState::Playlists { state } = ui.current_page_mut() {
                         state.target_scroll_offset =
-                            (state.target_scroll_offset - item_height as f64).max(0.0);
+                            (state.target_scroll_offset - item_height).max(0.0);
                     }
                     return true;
                 }

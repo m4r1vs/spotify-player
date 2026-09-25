@@ -11,8 +11,6 @@ use crate::{
     utils::format_duration,
 };
 
-#[cfg(feature = "image")]
-use super::PopupState;
 use super::{
     config, playback::play_animation, utils, utils::construct_and_render_block, Album, Alignment,
     Artist, ArtistFocusState, Block, Borders, BrowsePageUIState, Cell, Constraint, Context,
@@ -466,18 +464,26 @@ pub fn render_playlists_page(
 
     #[cfg(feature = "image")]
     {
-        let mut flat_playlists = vec![];
-        {
-            let data = state.data.read();
-            for item in &data.user_data.playlists {
-                if let PlaylistFolderItem::Playlist(p) = item {
-                    flat_playlists.push(p.clone());
-                }
-            }
-        }
-        let flat_playlists = ui.search_filtered_items(&flat_playlists);
+        use super::playlist_covers::GridLayout;
+        use ratatui::layout::{Position, Size};
+        use ratatui_image::sliced::SignedPosition;
 
-        if flat_playlists.is_empty() {
+        /// Grid rows above and below the visible ones whose covers are prepared ahead of time.
+        const PREFETCH_ROWS: usize = 2;
+
+        let data = state.data.read();
+        let all_playlists = data
+            .user_data
+            .playlists
+            .iter()
+            .filter_map(|item| match item {
+                PlaylistFolderItem::Playlist(p) => Some(p),
+                PlaylistFolderItem::Folder(_) => None,
+            })
+            .collect::<Vec<_>>();
+        let playlists = ui.search_filtered_items(&all_playlists);
+
+        if playlists.is_empty() {
             let text = if ui.popup.is_some() {
                 "No playlists found matching the query."
             } else {
@@ -495,327 +501,218 @@ pub fn render_playlists_page(
         let inner_rect = block.inner(rect);
         frame.render_widget(block, rect);
 
-        let (img_width, img_length, item_width, item_height, items_per_row) = {
-            let font_ratio = if let Some(ratio) = ui.last_playlists_page_render_info.font_ratio {
-                ratio
-            } else {
-                let ratio = super::utils::font_ratio(&ui.picker);
-                ui.last_playlists_page_render_info.font_ratio = Some(ratio);
-                ratio
-            };
-
-            let base_img_length = if configs.app_config.cover_img_length > 0 {
-                configs.app_config.cover_img_length as u16
-            } else {
-                (configs.app_config.cover_img_width as f32 / font_ratio).round() as u16
-            };
-
-            // increase items per row by sqrt(2) to approximately double the number of items per page
-            let items_per_row = (f32::from((inner_rect.width / (base_img_length + 2)).max(1))
-                * 1.414)
-                .round() as usize;
-            let items_per_row = items_per_row.max(1);
-            let item_width = inner_rect.width / items_per_row as u16;
-            let img_length = item_width.saturating_sub(2);
-
-            let img_width = (f32::from(img_length) * font_ratio).round() as u16;
-            let item_height = img_width + 2;
-
-            (
-                img_width,
-                img_length,
-                item_width,
-                item_height,
-                items_per_row,
-            )
+        let font_ratio = if let Some(ratio) = ui.last_playlists_page_render_info.font_ratio {
+            ratio
+        } else {
+            let ratio = super::utils::font_ratio(&ui.picker);
+            ui.last_playlists_page_render_info.font_ratio = Some(ratio);
+            ratio
         };
-
-        if inner_rect.width < 3 || inner_rect.height < item_height {
+        let layout = GridLayout::new(inner_rect, font_ratio, &configs.app_config);
+        if inner_rect.width < 3 || inner_rect.height < layout.item_height {
             return; // terminal too small
         }
+        ui.last_playlists_page_render_info.layout = Some(layout);
 
-        let selected_index = match ui.current_page_mut() {
+        let n_items = playlists.len();
+        let items_per_row = layout.items_per_row;
+        let item_height = f64::from(layout.item_height);
+        let inner_height = f64::from(inner_rect.height);
+
+        let (scroll_offset, selected_index) = match ui.current_page_mut() {
             PageState::Playlists { state } => {
-                if state.selected_index >= flat_playlists.len() {
-                    state.selected_index = flat_playlists.len().saturating_sub(1);
+                state.selected_index = state.selected_index.min(n_items - 1);
+                let max_scroll = ((n_items - 1) / items_per_row) as f64 * item_height;
+                let selected_y = (state.selected_index / items_per_row) as f64 * item_height;
+
+                // keep the selection in view, unless a manual scroll is being animated
+                if (state.scroll_offset - state.target_scroll_offset).abs() < 0.1 {
+                    if selected_y < state.target_scroll_offset {
+                        state.target_scroll_offset = selected_y;
+                    } else if selected_y + item_height > state.target_scroll_offset + inner_height {
+                        state.target_scroll_offset = selected_y + item_height - inner_height;
+                    }
                 }
-                state.selected_index
-            }
-            _ => 0,
-        };
+                state.target_scroll_offset = state.target_scroll_offset.clamp(0.0, max_scroll);
 
-        // Calculate visible rows
-        let max_visible_rows = (inner_rect.height / item_height) as usize;
-
-        let mut scroll_offset = 0.0;
-        let mut should_re_render = false;
-
-        if let PageState::Playlists { state } = ui.current_page_mut() {
-            let max_scroll = ((flat_playlists.len().saturating_sub(1) / items_per_row) as f64 * item_height as f64).max(0.0);
-            
-            // Snap target if selected_index is completely out of view and we're not actively animating a manual scroll
-            let selected_row = state.selected_index / items_per_row;
-            let selected_y = selected_row as f64 * item_height as f64;
-            
-            if (state.scroll_offset - state.target_scroll_offset).abs() < 0.1 {
-                if selected_y < state.target_scroll_offset {
-                    state.target_scroll_offset = selected_y;
-                } else if selected_y + item_height as f64 > state.target_scroll_offset + inner_rect.height as f64 {
-                    state.target_scroll_offset = selected_y + item_height as f64 - inner_rect.height as f64;
+                if (state.scroll_offset - state.target_scroll_offset).abs() > 0.1 {
+                    let diff = state.target_scroll_offset - state.scroll_offset;
+                    let step = (diff.abs() * 0.3 * state.scroll_speed)
+                        .max(state.scroll_speed)
+                        .min(diff.abs());
+                    state.scroll_offset += diff.signum() * step;
+                } else {
+                    state.scroll_offset = state.target_scroll_offset;
                 }
-            }
 
-            state.target_scroll_offset = state.target_scroll_offset.clamp(0.0, max_scroll);
-
-            if (state.scroll_offset - state.target_scroll_offset).abs() > 0.1 {
-                let diff = state.target_scroll_offset - state.scroll_offset;
-                let step = (diff.abs() * 0.3 * state.scroll_speed).max(state.scroll_speed).min(diff.abs());
-                state.scroll_offset += diff.signum() * step;
-                should_re_render = true;
-                state.rendered = false;
-            } else {
-                state.scroll_offset = state.target_scroll_offset;
+                // move the selection along once scrolling pushes it fully out of view
+                let selected_y_offset = selected_y - state.scroll_offset;
+                if selected_y_offset + f64::from(layout.img_rows) < 0.0 {
+                    state.selected_index = (state.selected_index + items_per_row).min(n_items - 1);
+                } else if selected_y_offset >= inner_height {
+                    state.selected_index = state.selected_index.saturating_sub(items_per_row);
+                }
+                (state.scroll_offset, state.selected_index)
             }
-            
-            scroll_offset = state.scroll_offset;
-            
-            // Update highlight if it goes out of view due to scrolling
-            let selected_y_offset = selected_y - scroll_offset;
-            if selected_y_offset + (img_width as f64) < 0.0 {
-                state.selected_index = std::cmp::min(state.selected_index + items_per_row, flat_playlists.len().saturating_sub(1));
-            } else if selected_y_offset >= inner_rect.height as f64 {
-                state.selected_index = state.selected_index.saturating_sub(items_per_row);
-            }
-        }
-        
-        let selected_index = match ui.current_page() {
-            PageState::Playlists { state } => state.selected_index,
-            _ => 0,
+            _ => return,
         };
 
-        let search_query = match ui.popup {
-            Some(PopupState::Search { ref query, .. }) => query.clone(),
-            _ => String::new(),
-        };
+        // Rows move by whole cells; `scroll` is the number of cells scrolled past the top.
+        let scroll = scroll_offset as i32;
+        let row_height = i32::from(layout.item_height);
+        let inner_h = i32::from(inner_rect.height);
+        let n_rows = n_items.div_ceil(items_per_row);
+        let first_row = (scroll / row_height) as usize;
+        let last_row = (((scroll + inner_h - 1) / row_height) as usize).min(n_rows - 1);
 
-        let view_changed = (
-            inner_rect,
-            items_per_row,
-            max_visible_rows,
-            &search_query,
-        ) != (
-            ui.last_playlists_page_render_info.rect,
-            ui.last_playlists_page_render_info.items_per_row,
-            ui.last_playlists_page_render_info.max_visible_rows,
-            &ui.last_playlists_page_render_info.search_query,
+        let ui = &mut **ui;
+        let covers = &mut ui.last_playlists_page_render_info.covers;
+        covers.begin_frame(
+            state,
+            &ui.picker,
+            Size::new(layout.img_cols, layout.img_rows),
         );
+        let max_pending = 2 * items_per_row;
 
-        if view_changed {
-            ui.last_playlists_page_render_info.rect = inner_rect;
-            ui.last_playlists_page_render_info.items_per_row = items_per_row;
-            ui.last_playlists_page_render_info.max_visible_rows = max_visible_rows;
-            ui.last_playlists_page_render_info.search_query = search_query;
-            if let PageState::Playlists { state } = ui.current_page_mut() {
-                state.rendered = false;
-            }
-        }
+        for row in first_row..=last_row {
+            for col in 0..items_per_row {
+                let i = row * items_per_row + col;
+                let Some(p) = playlists.get(i) else { break };
 
-        let mut all_images_rendered = !should_re_render;
-        let content_width = (items_per_row as u16).saturating_sub(1) * item_width + img_length;
-        let left_margin = inner_rect.width.saturating_sub(content_width) / 2;
+                // position relative to `inner_rect`; `y` is negative for rows scrolled past the top
+                let x = layout.left_margin + col as u16 * layout.item_width;
+                let y = row as i32 * row_height - scroll;
+                let is_selected = is_active && i == selected_index;
 
-        let start_row = (scroll_offset / item_height as f64).floor() as usize;
-
-        for (i, p) in flat_playlists.iter().enumerate() {
-            let row = i / items_per_row;
-            let col = i % items_per_row;
-
-            if row < start_row.saturating_sub(3) || row >= start_row + max_visible_rows + 5 {
-                continue;
-            }
-
-            let y_offset_f = (row as f64 * item_height as f64) - scroll_offset;
-            let is_visible = y_offset_f > -(item_height as f64) && y_offset_f < inner_rect.height as f64;
-            
-            let y_offset = y_offset_f.max(0.0) as u16;
-            
-            let x = inner_rect.x + left_margin + (col as u16 * item_width);
-            let y = inner_rect.y + y_offset;
-
-            // if y_offset_f is negative, the cover is partially hidden at the top
-            let top_hidden = if y_offset_f < 0.0 { -y_offset_f as u16 } else { 0 };
-            
-            // available cover height taking into account both top hidden and bottom hidden
-            let available_cover_height = if !is_visible {
-                img_width
-            } else if y_offset_f < 0.0 {
-                img_width.saturating_sub(top_hidden).min(inner_rect.height)
-            } else {
-                inner_rect.height.saturating_sub(y_offset).min(img_width)
-            };
-
-            let cover_rect = Rect::new(x, y, img_length, available_cover_height);
-            let title_visible = y_offset_f + (img_width as f64) < inner_rect.height as f64;
-            
-            if is_visible && i == selected_index && is_active {
-                let style = ui.theme.selection(true);
-                let content_height = if title_visible {
-                    available_cover_height + 1
-                } else {
-                    available_cover_height
-                };
-                
-                let mut border_x = x.saturating_sub(1);
-                let mut border_y = y.saturating_sub(1);
-                let mut border_w = img_length + 2;
-                let mut border_h = content_height + 2;
-                let mut borders = Borders::ALL;
-                
-                if y <= inner_rect.y {
-                    border_y = y;
-                    border_h = content_height + 1;
-                    borders -= Borders::TOP;
-                }
-                if x <= inner_rect.x {
-                    border_x = x;
-                    border_w = img_length + 1;
-                    borders -= Borders::LEFT;
-                }
-                
-                let border_rect = Rect::new(border_x, border_y, border_w, border_h);
-                
-                let custom_border = ratatui::symbols::border::Set {
-                    top_left: " ",
-                    top_right: " ",
-                    bottom_left: " ",
-                    bottom_right: " ",
-                    vertical_left: "🮇",
-                    vertical_right: "▎",
-                    horizontal_top: "▂",
-                    horizontal_bottom: "🮂",
-                };
-                
-                let border_fg = if style.add_modifier.contains(ratatui::style::Modifier::REVERSED) {
-                    style.fg.unwrap_or(ratatui::style::Color::Reset)
-                } else {
-                    style.bg.unwrap_or(ratatui::style::Color::Reset)
-                };
-
-                let border_block = Block::default()
-                    .borders(borders)
-                    .border_set(custom_border)
-                    .border_style(Style::default().fg(border_fg));
-                
-                // Draw the 1/4 block border around the combined area
-                frame.render_widget(border_block, border_rect);
-            }
-
-            if is_visible && title_visible {
-                let title_rect = Rect::new(x, y + img_width, img_length, 1);
-                let mut style = Style::default();
-                if i == selected_index && is_active {
-                    style = ui.theme.selection(true);
+                if is_selected {
+                    render_playlist_selection_border(frame, &ui.theme, inner_rect, layout, x, y);
                 }
 
-                let title = p.name.clone();
-                frame.render_widget(
-                    Paragraph::new(title).style(style),
-                    title_rect,
-                );
-            }
-
-            if let Some(url) = &p.cover_url {
-                let is_top_cropped = y_offset_f < 0.0;
-                let target_rect = if is_top_cropped { cover_rect } else { Rect::new(0, 0, img_length, img_width) };
-                
-                let cache_key = if is_top_cropped {
-                    format!("{}_{}x{}", url, target_rect.width, target_rect.height)
-                } else {
-                    url.clone()
-                };
-                
-                let needs_encode = !ui
-                    .last_playlists_page_render_info
-                    .covers
-                    .contains_key(&cache_key);
-
-                if needs_encode {
-                    let image_exists = state.data.read().caches.images.contains_key(url);
-                    
-                    if image_exists {
-                        all_images_rendered = false;
-                        
-                        // Asynchronous encode
-                        if ui.last_playlists_page_render_info.encoding_tasks.insert((url.clone(), target_rect)) {
-                            let state_clone = state.clone();
-                            let url_clone = url.clone();
-                            let cache_key_clone = cache_key.clone();
-                            let picker = ui.picker.clone();
-                            let img_width_clone = img_width;
-                            
-                            std::thread::spawn(move || {
-                                let image = {
-                                    let data = state_clone.data.read();
-                                    data.caches.images.get(&url_clone).cloned()
-                                };
-                                
-                                if let Some(mut img) = image {
-                                    if target_rect.height < img_width_clone {
-                                        use image::GenericImageView;
-                                        let (w, h) = img.dimensions();
-                                        let crop_h = (h as f32 * (f32::from(target_rect.height) / f32::from(img_width_clone))).round() as u32;
-                                        img = img.crop_imm(0, h.saturating_sub(crop_h), w, crop_h);
-                                    }
-                                    
-                                    let result = super::cover_image::CoverImage::new(&picker, &img, target_rect);
-                                    
-                                    let mut ui = state_clone.ui.lock();
-                                    ui.last_playlists_page_render_info.encoding_tasks.remove(&(url_clone.clone(), target_rect));
-                                    if let Ok(cover) = result {
-                                        ui.last_playlists_page_render_info.covers.insert(
-                                            cache_key_clone,
-                                            (target_rect, cover),
-                                            *crate::state::TTL_CACHE_DURATION,
-                                        );
-                                    }
-                                } else {
-                                    let mut ui = state_clone.ui.lock();
-                                    ui.last_playlists_page_render_info.encoding_tasks.remove(&(url_clone, target_rect));
-                                }
-                            });
-                        }
+                let title_y = y + i32::from(layout.img_rows);
+                if (0..inner_h).contains(&title_y) {
+                    let style = if is_selected {
+                        ui.theme.selection(true)
                     } else {
-                        all_images_rendered = false;
-                        let is_rendered = match ui.current_page() {
-                            PageState::Playlists { state } => state.rendered,
-                            _ => false,
-                        };
-                        if !is_rendered {
-                            state.client_sender.send(crate::client::ClientRequest::LoadImage(url.clone())).unwrap_or_default();
-                        }
-                    }
+                        Style::default()
+                    };
+                    frame.render_widget(
+                        Paragraph::new(p.name.as_str()).style(style),
+                        Rect::new(
+                            inner_rect.x + x,
+                            inner_rect.y + title_y as u16,
+                            layout.img_cols,
+                            1,
+                        ),
+                    );
                 }
 
-                if is_visible {
-                    if let Some(entry) = ui.last_playlists_page_render_info.covers.get_mut(&cache_key) {
-                        entry.1.render(frame, cover_rect);
-                    } else if is_top_cropped {
-                        // Fallback to the full image while the cropped one is being encoded
-                        if let Some(entry) = ui.last_playlists_page_render_info.covers.get_mut(url) {
-                            entry.1.render(frame, cover_rect);
-                        }
-                    }
+                if let Some(url) = &p.cover_url {
+                    covers.request(&data, &state.client_sender, &ui.picker, url, max_pending);
+                    covers.render(
+                        frame.buffer_mut(),
+                        url,
+                        inner_rect,
+                        SignedPosition {
+                            x: x as i16,
+                            y: y as i16,
+                        },
+                    );
                 }
             }
         }
 
-        if let PageState::Playlists { state } = ui.current_page_mut() {
-            if all_images_rendered {
-                state.rendered = true;
-                ui.last_playlists_page_render_info.rendered = true;
+        // prepare the covers just outside the view, so they are ready when scrolled to
+        let prefetch_rows = (first_row.saturating_sub(PREFETCH_ROWS)..first_row)
+            .chain(last_row + 1..=(last_row + PREFETCH_ROWS).min(n_rows - 1));
+        for row in prefetch_rows {
+            let items = playlists
+                .iter()
+                .skip(row * items_per_row)
+                .take(items_per_row);
+            for url in items.filter_map(|p| p.cover_url.as_deref()) {
+                covers.request(&data, &state.client_sender, &ui.picker, url, max_pending);
             }
         }
+
+        let kept_rows = last_row - first_row + 1 + 2 * PREFETCH_ROWS;
+        covers.end_frame(
+            frame.buffer_mut(),
+            Position::new(rect.x, rect.y),
+            kept_rows * items_per_row,
+        );
     }
+}
+
+/// Draw the quarter-block selection frame around a grid item whose cover starts at `(x, y)`
+/// relative to `inner`, clipped to `inner`.
+#[cfg(feature = "image")]
+fn render_playlist_selection_border(
+    frame: &mut Frame,
+    theme: &config::Theme,
+    inner: Rect,
+    layout: super::playlist_covers::GridLayout,
+    x: u16,
+    y: i32,
+) {
+    let style = theme.selection(true);
+    let border_fg = if style
+        .add_modifier
+        .contains(ratatui::style::Modifier::REVERSED)
+    {
+        style.fg.unwrap_or(ratatui::style::Color::Reset)
+    } else {
+        style.bg.unwrap_or(ratatui::style::Color::Reset)
+    };
+
+    // the frame encloses the cover and its title, with a one-cell margin on each side
+    let (inner_w, inner_h) = (i32::from(inner.width), i32::from(inner.height));
+    let mut borders = Borders::ALL;
+    let mut left = i32::from(x) - 1;
+    let mut top = y - 1;
+    let mut right = i32::from(x + layout.img_cols) + 1;
+    let mut bottom = y + i32::from(layout.img_rows) + 2;
+    if left < 0 {
+        left = 0;
+        borders -= Borders::LEFT;
+    }
+    if top < 0 {
+        top = 0;
+        borders -= Borders::TOP;
+    }
+    if right > inner_w {
+        right = inner_w;
+        borders -= Borders::RIGHT;
+    }
+    if bottom > inner_h {
+        bottom = inner_h;
+        borders -= Borders::BOTTOM;
+    }
+    if right <= left || bottom <= top {
+        return;
+    }
+
+    let border_set = ratatui::symbols::border::Set {
+        top_left: " ",
+        top_right: " ",
+        bottom_left: " ",
+        bottom_right: " ",
+        vertical_left: "🮇",
+        vertical_right: "▎",
+        horizontal_top: "▂",
+        horizontal_bottom: "🮂",
+    };
+    frame.render_widget(
+        Block::default()
+            .borders(borders)
+            .border_set(border_set)
+            .border_style(Style::default().fg(border_fg)),
+        Rect::new(
+            inner.x + left as u16,
+            inner.y + top as u16,
+            (right - left) as u16,
+            (bottom - top) as u16,
+        ),
+    );
 }
 
 pub fn render_library_page(

@@ -38,6 +38,12 @@ const NARROW: (u16, u16) = (120, 40);
 fn init_config() {
     static INIT: OnceLock<()> = OnceLock::new();
     INIT.get_or_init(|| {
+        // Render as in a plain terminal. Inside tmux, `Picker` wraps escapes for passthrough and
+        // runs `tmux set` on the caller's pane.
+        std::env::remove_var("TMUX");
+        std::env::set_var("TERM", "xterm-256color");
+        std::env::set_var("TERM_PROGRAM", "ghostty");
+
         let dir =
             std::env::temp_dir().join(format!("spotify-player-visual-test-{}", std::process::id()));
         let config_dir = dir.join("config");
@@ -139,16 +145,21 @@ struct Harness {
 }
 
 impl Harness {
-    fn new(protocol: ProtocolType, (width, height): (u16, u16), loaded: fn(usize) -> bool) -> Self {
+    fn new(
+        protocol: ProtocolType,
+        (width, height): (u16, u16),
+        n_playlists: usize,
+        loaded: fn(usize) -> bool,
+    ) -> Self {
         init_config();
         let (tx, client_rx) = flume::unbounded();
         let state = Arc::new(State::new(tx, false, Arc::new(Mutex::new(VecDeque::new()))));
         {
             let mut data = state.data.write();
-            data.user_data.playlists = (0..N_PLAYLISTS)
+            data.user_data.playlists = (0..n_playlists)
                 .map(|i| PlaylistFolderItem::Playlist(playlist(i)))
                 .collect();
-            for i in (0..N_PLAYLISTS).filter(|i| loaded(*i)) {
+            for i in (0..n_playlists).filter(|i| loaded(*i)) {
                 data.caches
                     .images
                     .insert(cover_url(i), cover_image(i), *TTL_CACHE_DURATION);
@@ -214,22 +225,32 @@ impl Harness {
     }
 
     fn has_pending_work(&self) -> bool {
-        !self
-            .state
+        self.state
             .ui
             .lock()
             .last_playlists_page_render_info
-            .encoding_tasks
-            .is_empty()
+            .covers
+            .has_pending()
+    }
+
+    fn encoded_covers(&self) -> usize {
+        self.state
+            .ui
+            .lock()
+            .last_playlists_page_render_info
+            .covers
+            .encoded
     }
 
     /// Height of one grid row (cover + title + gap) in cells.
     fn item_height(&self) -> f64 {
         let ui = self.state.ui.lock();
-        let info = &ui.last_playlists_page_render_info;
-        let item_width = info.rect.width / info.items_per_row as u16;
-        let img_rows = (f32::from(item_width.saturating_sub(2)) * info.font_ratio.unwrap()).round();
-        f64::from(img_rows) + 2.0
+        f64::from(
+            ui.last_playlists_page_render_info
+                .layout
+                .unwrap()
+                .item_height,
+        )
     }
 
     fn load_image_requests(&self) -> usize {
@@ -323,7 +344,7 @@ fn scenarios() -> Vec<Scenario> {
 }
 
 fn render_scenario(protocol: ProtocolType, s: &Scenario) -> Buffer {
-    let mut h = Harness::new(protocol, s.size, s.loaded);
+    let mut h = Harness::new(protocol, s.size, N_PLAYLISTS, s.loaded);
     h.is_active = s.active;
     if let Some(query) = s.query {
         h.state.ui.lock().popup = Some(PopupState::Search {
@@ -364,8 +385,9 @@ fn update_goldens() -> bool {
     std::env::var_os("SPOTIFY_PLAYER_UPDATE_GOLDENS").is_some()
 }
 
-/// Fraction of pixels allowed to differ before a halfblocks scenario fails.
-const MAX_DIFF_FRACTION: f64 = 0.005;
+/// Fraction of pixels allowed to differ before a halfblocks scenario fails. Small enough that a
+/// single missing title (~0.03%) is caught.
+const MAX_DIFF_FRACTION: f64 = 0.0002;
 
 #[test]
 fn playlists_page_halfblocks() {
@@ -516,21 +538,69 @@ fn print_stats(label: &str, s: &PassStats) {
     );
 }
 
-/// Measures scrolling cost with the Kitty protocol: three rows down, then back up.
+/// Measures scrolling cost with the Kitty protocol: six rows down into unseen covers, then back up.
 #[test]
 fn playlists_page_scroll_perf() {
-    let mut h = Harness::new(ProtocolType::Kitty, WIDE, |_| true);
-    let mut prev = h.settle().pop().unwrap();
-    let rows = 3.0 * h.item_height();
+    const N: usize = 120;
+    let mut h = Harness::new(ProtocolType::Kitty, WIDE, N, |_| true);
+    let frames = h.settle();
+    let initial_transmits: usize = frames.iter().map(|b| raster::kitty_transmits(b).0).sum();
+    let mut prev = frames.last().unwrap().clone();
+    let rows = 6.0 * h.item_height();
     h.load_image_requests();
 
     let down = animate_to(&mut h, rows, &mut prev);
     let up = animate_to(&mut h, 0.0, &mut prev);
     let load_requests = h.load_image_requests();
 
-    print_stats("scroll down 3 rows", &down);
+    print_stats("scroll down 6 rows", &down);
     print_stats("scroll back up", &up);
-    println!("LoadImage requests while scrolling: {load_requests}");
+    println!(
+        "LoadImage requests while scrolling: {load_requests}, covers encoded: {}",
+        h.encoded_covers()
+    );
+
+    assert!(
+        h.encoded_covers() <= N,
+        "covers were encoded more than once: {} encodes for {N} covers",
+        h.encoded_covers()
+    );
+    let transmits = initial_transmits + down.transmits + up.transmits;
+    assert!(
+        transmits <= N,
+        "covers were sent to the terminal more than once ({transmits} transmits for {N} covers)"
+    );
+    assert_eq!(
+        up.transmits, 0,
+        "scrolling back over seen rows re-sent covers"
+    );
+    assert_eq!(load_requests, 0, "all images were already loaded");
+}
+
+/// Each missing cover image is requested from the client once, not on every frame.
+#[test]
+fn playlists_page_requests_missing_images_once() {
+    let mut h = Harness::new(ProtocolType::Kitty, WIDE, N_PLAYLISTS, |i| i % 3 != 0);
+    for _ in 0..30 {
+        h.draw();
+    }
+    let mut urls: Vec<String> = h
+        .client_rx
+        .drain()
+        .filter_map(|r| match r {
+            ClientRequest::LoadImage(url) => Some(url),
+            _ => None,
+        })
+        .collect();
+    let requests = urls.len();
+    urls.sort();
+    urls.dedup();
+    assert!(requests > 0, "missing images were never requested");
+    assert_eq!(
+        requests,
+        urls.len(),
+        "some images were requested repeatedly"
+    );
 }
 
 /// Renders the real library from the local spotify_player cache, for eyeballing only.
@@ -543,7 +613,7 @@ fn playlists_page_real_library() {
     ))
     .unwrap();
 
-    let mut h = Harness::new(ProtocolType::Halfblocks, WIDE, |_| false);
+    let mut h = Harness::new(ProtocolType::Halfblocks, WIDE, 0, |_| false);
     {
         let mut data = h.state.data.write();
         for item in playlists.iter().take(60) {

@@ -38,52 +38,13 @@ impl std::fmt::Debug for ImageRenderInfo {
 }
 
 #[cfg(feature = "image")]
+#[derive(Debug, Default)]
 pub struct PlaylistsPageRenderInfo {
-    /// Cover images prepared for the currently rendered grid, keyed by image URL.
-    pub covers: ttl_cache::TtlCache<String, (ratatui::layout::Rect, CoverImage)>,
-    pub encoding_tasks: std::collections::HashSet<(String, ratatui::layout::Rect)>,
-    pub rendered: bool,
-    pub start_row: usize,
-    pub items_per_row: usize,
-    pub max_visible_rows: usize,
-    pub rect: ratatui::layout::Rect,
-    pub search_query: String,
+    pub covers: crate::ui::playlist_covers::CoverStore,
+    /// Grid geometry of the last render; `None` until the page has been rendered.
+    pub layout: Option<crate::ui::playlist_covers::GridLayout>,
     /// Cached cell width/height ratio; reset whenever the terminal is resized.
     pub font_ratio: Option<f32>,
-}
-
-#[cfg(feature = "image")]
-impl Default for PlaylistsPageRenderInfo {
-    fn default() -> Self {
-        Self {
-            covers: ttl_cache::TtlCache::new(256),
-            encoding_tasks: std::collections::HashSet::new(),
-            rendered: false,
-            start_row: 0,
-            items_per_row: 0,
-            max_visible_rows: 0,
-            rect: ratatui::layout::Rect::default(),
-            search_query: String::new(),
-            font_ratio: None,
-        }
-    }
-}
-
-#[cfg(feature = "image")]
-impl std::fmt::Debug for PlaylistsPageRenderInfo {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PlaylistsPageRenderInfo")
-            .field("covers_capacity", &self.covers.capacity())
-            .field("encoding_tasks", &self.encoding_tasks.len())
-            .field("rendered", &self.rendered)
-            .field("start_row", &self.start_row)
-            .field("items_per_row", &self.items_per_row)
-            .field("max_visible_rows", &self.max_visible_rows)
-            .field("rect", &self.rect)
-            .field("search_query", &self.search_query)
-            .field("font_ratio", &self.font_ratio)
-            .finish()
-    }
 }
 
 /// Application's UI state
@@ -123,7 +84,11 @@ impl UIState {
     }
 
     pub fn new_search_popup(&mut self) {
-        if let Some(PopupState::Search { ref mut input_focused, .. }) = self.popup {
+        if let Some(PopupState::Search {
+            ref mut input_focused,
+            ..
+        }) = self.popup
+        {
             *input_focused = true;
             return;
         }
